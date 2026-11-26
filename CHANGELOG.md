@@ -4,6 +4,11 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **What the two on-screen keyboards share around the keys is C89** (`ime/ime_ui_shared.c`, `ime_ui_shared.h`; `ime_ui_shared.cpp` is gone). The pad as the panel reads it with its repeats and shortcuts, the selector's fade, the caret in the text field, the edit menu, the text conversions and the keyboard's clipboard.
+  - The functions take pointers. The two structures that held references to a keyboard's state (`OskPadInputState`, `OskShortcutRepeatState`) hold pointers; `OskVirtualPadInputView`'s methods are `OskVirtualPadDown`, `OskVirtualPadPressed` and `OskVirtualPadRepeatPressed`, with `ORBIS_PAD_BUTTON_*` bits for buttons; `SelectorFadeState` is made by `MakeSelectorFadeState`.
+  - The four templates are functions: the edit menu that is open is an `OskEditMenuPopup` (`OSK_EDIT_MENU_*`) in both keyboards, where each had an enum class of its own, and `DrawAndHandleOskEditMenuPopup` calls back through a function pointer and a context.
+  - `ImeLayer`, the C++ class the two keyboards derive from, and the two functions the overlay draws them by moved to `ime_ui.h` and `ime_ui.cpp`.
+  - Compared with the C++ it replaces over a mocked overlay and pad: 400000 frames of random pad input, text, menus and selections gave the same output and draw calls byte for byte (25000 shortcut actions, 37000 menu choices). Not run in a game yet.
 - **With precise GPU readbacks the GPU is given work as it is recorded, not only when a readback asks** (`Rasterizer::FlushEarly`). Not run in a game yet, and the gain is not measured here.
   - A precise readback waits for everything the GPU has been given. Between readbacks the GPU got nothing and sat idle while the frame was recorded, and the next readback then waited for all of it at once. After 256 draws and dispatches since the last submit, the next dispatch submits what there is, so the GPU works while recording goes on and the wait is shorter. Only at a dispatch, where no pass is open, so no pass is cut in two.
   - Only with GPU Readbacks set to Precise and on NVIDIA's driver, where the Shadow of the Colossus PC port measured about a fifth more frames from the same thing. Everything else is as before.

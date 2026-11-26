@@ -38,25 +38,7 @@ constexpr const char* kSelectorInputId = "##ImeDialogSelectorInput";
 constexpr const char* kSelectorPredictId = "##ImeDialogSelectorPredict";
 constexpr const char* kSelectorCloseId = "##ImeDialogSelectorClose";
 
-using Libraries::Ime::BrightenColor;
-using Libraries::Ime::CommitOskPadInputFrame;
-using Libraries::Ime::ComputeOskPadInputFrame;
-using Libraries::Ime::DrawInactiveCaretOverlay;
-using Libraries::Ime::ImeClipboardText;
 using Libraries::Ime::ImeLayer;
-using Libraries::Ime::kPanelEdgeWrapHoldDelaySec;
-using Libraries::Ime::kRepeatIntentWindowSec;
-using Libraries::Ime::OskPadInputFrame;
-using Libraries::Ime::OskPadInputState;
-using Libraries::Ime::OskVirtualPadInputView;
-using Libraries::Ime::ReadVirtualPadSnapshot;
-using Libraries::Ime::SetImeClipboardText;
-using Libraries::Ime::Utf16CountFromUtf8Range;
-using Libraries::Ime::Utf16ToUtf8;
-using Libraries::Ime::Utf8ByteIndexFromUtf16Index;
-using Libraries::Ime::Utf8Step;
-using Libraries::Ime::Utf8ToUtf16;
-using Libraries::Ime::VirtualPadSnapshot;
 
 bool IsMappedGuestBuffer(const void* ptr, size_t bytes) {
     if (!ptr || bytes == 0) {
@@ -359,16 +341,16 @@ ImeDialogUi::ImeDialogUi(ImeDialogState* state, OrbisImeDialogStatus* status,
     : state(state), status(status), result(result) {
 
     if (state && *status == OrbisImeDialogStatus::Running) {
-        kb_layout_selection = Libraries::Ime::ResolveInitialKbLayoutSelection(
-            state->ext_option, state->panel_priority);
+        kb_layout_selection =
+            ResolveInitialKbLayoutSelection(state->ext_option, state->panel_priority);
         last_nav_layout_selection = kb_layout_selection;
         nav_layout_selection_initialized = true;
         kb_alpha_family = (kb_layout_selection.family == IME_KB_LAYOUT_FAMILY_SPECIALS)
                               ? IME_KB_LAYOUT_FAMILY_SPECIALS
                               : IME_KB_LAYOUT_FAMILY_LATIN;
-        Libraries::Ime::InitializeDefaultOskSelectionAnchor(
-            kb_layout_selection, state->ext_option, pending_keyboard_row, pending_keyboard_col,
-            last_keyboard_selected_row, last_keyboard_selected_col);
+        InitializeDefaultOskSelectionAnchor(
+            &kb_layout_selection, state->ext_option, &pending_keyboard_row, &pending_keyboard_col,
+            &last_keyboard_selected_row, &last_keyboard_selected_col);
         ImeLayer::Add(this);
     }
 }
@@ -622,29 +604,27 @@ void ImeDialogUi::Draw() {
         const bool controller_shortcuts_disabled =
             ((state->disable_device & ORBIS_IME_DISABLE_DEVICE_CONTROLLER) != 0);
         const bool allow_osk_shortcuts = !controller_shortcuts_disabled;
-        OskPadInputState panel_pad_state{
-            prev_virtual_buttons,
-            prev_virtual_cross_down,
-            prev_virtual_lstick_left_down,
-            prev_virtual_lstick_right_down,
-            prev_virtual_lstick_up_down,
-            prev_virtual_lstick_down_down,
-            left_stick_repeat_dir,
-            left_stick_next_repeat_time,
-            virtual_cross_next_repeat_time,
-            prev_virtual_dpad_left_down,
-            prev_virtual_dpad_right_down,
-            prev_virtual_dpad_up_down,
-            prev_virtual_dpad_down_down,
-            virtual_dpad_left_next_repeat_time,
-            virtual_dpad_right_next_repeat_time,
-            virtual_dpad_up_next_repeat_time,
-            virtual_dpad_down_next_repeat_time,
-        };
+        OskPadInputState panel_pad_state{&prev_virtual_buttons,
+                                         &prev_virtual_cross_down,
+                                         &prev_virtual_lstick_left_down,
+                                         &prev_virtual_lstick_right_down,
+                                         &prev_virtual_lstick_up_down,
+                                         &prev_virtual_lstick_down_down,
+                                         &left_stick_repeat_dir,
+                                         &left_stick_next_repeat_time,
+                                         &virtual_cross_next_repeat_time,
+                                         &prev_virtual_dpad_left_down,
+                                         &prev_virtual_dpad_right_down,
+                                         &prev_virtual_dpad_up_down,
+                                         &prev_virtual_dpad_down_down,
+                                         &virtual_dpad_left_next_repeat_time,
+                                         &virtual_dpad_right_next_repeat_time,
+                                         &virtual_dpad_up_next_repeat_time,
+                                         &virtual_dpad_down_next_repeat_time};
         const OskPadInputFrame panel_input = ComputeOskPadInputFrame(
-            virtual_pad, allow_osk_shortcuts, first_render, panel_pad_state);
+            &virtual_pad, allow_osk_shortcuts, first_render, &panel_pad_state);
 
-        const OskVirtualPadInputView virtual_pad_input(panel_input);
+        const OskVirtualPadInputView virtual_pad_input = MakeOskVirtualPadInputView(&panel_input);
         const bool cross_down = panel_input.cross_down;
         const bool panel_activate_pressed_raw = panel_input.panel_activate_pressed_raw;
         const bool panel_activate_repeat_raw = panel_input.panel_activate_repeat_raw;
@@ -661,7 +641,7 @@ void ImeDialogUi::Draw() {
         const double nav_now = ovl_time();
         const bool cancel_shortcut_pressed =
             allow_osk_shortcuts &&
-            virtual_pad_input.Pressed(Libraries::Pad::OrbisPadButtonDataOffset::Circle);
+            OskVirtualPadPressed(&virtual_pad_input, ORBIS_PAD_BUTTON_CIRCLE);
         if (osk_control_input) {
             pointer_navigation_active = false;
         }
@@ -818,7 +798,7 @@ void ImeDialogUi::Draw() {
             const auto& element = top_elements[static_cast<std::size_t>(target_idx)];
             return std::clamp(clamped_col, element.min_col, element.max_col);
         };
-        const bool menu_modal = (edit_menu_popup != EditMenuPopup::None);
+        const bool menu_modal = (edit_menu_popup != OSK_EDIT_MENU_NONE);
         const int keyboard_row_before_panel_nav_raw =
             (pending_keyboard_row >= keyboard_min_row && pending_keyboard_row <= keyboard_max_row)
                 ? pending_keyboard_row
@@ -895,28 +875,29 @@ void ImeDialogUi::Draw() {
         }
 
         DrawInputText(metrics, state->is_multi_line);
-        static std::unordered_map<u32, Libraries::Ime::SelectorFadeState> s_selector_fade_states;
+        static std::unordered_map<u32, SelectorFadeState> s_selector_fade_states;
         const auto draw_selector = [&](const char* selector_id, ovl_vec2_t pos, ovl_vec2_t size,
                                        bool selected, bool pulse_triggered) {
-            auto& fade_state = s_selector_fade_states[ovl_get_id(selector_id)];
+            auto& fade_state =
+                s_selector_fade_states.try_emplace(ovl_get_id(selector_id), MakeSelectorFadeState())
+                    .first->second;
             const double now = ovl_time();
             if (selected && pulse_triggered) {
-                Libraries::Ime::TriggerSelectorPressPulse(fade_state, now);
+                TriggerSelectorPressPulse(&fade_state, now);
             }
             const float selector_corner_radius =
                 std::max(0.0f, metrics.corner_radius - kSelectorInnerMargin);
-            Libraries::Ime::UpdateSelectorFadeState(fade_state, pos, size, kSelectorInnerMargin,
-                                                    selector_corner_radius, selected, now);
+            UpdateSelectorFadeState(&fade_state, pos, size, kSelectorInnerMargin,
+                                    selector_corner_radius, selected, now);
             const float press_pulse_expand =
                 selected
                     ? ComputePressPulseExpand(
                           fade_state.press_pulse_started_at, now, kSelectorPressPulseDurationSec,
                           kSelectorBorderThickness * kSelectorPressPulseExpandBorderFactor)
                     : 0.0f;
-            Libraries::Ime::DrawSelectorFadeState(
-                fade_state, ovl_window_draw_list(), kSelectorOverlayColor, kSelectorBorderColor,
-                kSelectorBorderThickness, Libraries::Ime::kSelectorFadeOutDurationSec, now,
-                press_pulse_expand);
+            DrawSelectorFadeState(&fade_state, ovl_window_draw_list(), kSelectorOverlayColor,
+                                  kSelectorBorderColor, kSelectorBorderThickness,
+                                  kSelectorFadeOutDurationSec, now, press_pulse_expand);
         };
         draw_selector(kSelectorInputId, metrics.input_pos_screen, metrics.input_size, false,
                       panel_selection == PanelSelectionTarget::Input && panel_activate_pressed_raw);
@@ -1207,7 +1188,7 @@ void ImeDialogUi::Draw() {
         kb_params.allow_activate_input = allow_osk_shortcuts && accept_armed && !menu_modal &&
                                          !text_select_mode &&
                                          (panel_selection == PanelSelectionTarget::Keyboard);
-        ApplyOskPanelNavToKeyboardParams(kb_params, allow_osk_shortcuts, panel_input);
+        ApplyOskPanelNavToKeyboardParams(&kb_params, allow_osk_shortcuts, &panel_input);
         kb_params.external_activate_pressed = panel_activate_pressed;
         kb_params.external_activate_repeat =
             allow_osk_shortcuts && accept_armed && panel_activate_repeat_raw;
@@ -1312,18 +1293,16 @@ void ImeDialogUi::Draw() {
             panel_selection = PanelSelectionTarget::Keyboard;
         };
         const auto open_main_menu = [&]() {
-            Libraries::Ime::OpenOskMainEditMenu(edit_menu_popup, edit_menu_index,
-                                                menu_activate_armed);
+            OpenOskMainEditMenu(&edit_menu_popup, &edit_menu_index, &menu_activate_armed);
         };
         const auto open_actions_menu = [&]() {
-            Libraries::Ime::OpenOskActionsEditMenu(edit_menu_popup, edit_menu_index,
-                                                   menu_activate_armed);
+            OpenOskActionsEditMenu(&edit_menu_popup, &edit_menu_index, &menu_activate_armed);
         };
         const auto apply_main_menu_action = [&](int action_index) {
             switch (action_index) {
             case 0: // Select
                 begin_text_selection_from_caret();
-                edit_menu_popup = EditMenuPopup::None;
+                edit_menu_popup = OSK_EDIT_MENU_NONE;
                 break;
             case 1: // Select All
                 select_all_text();
@@ -1333,7 +1312,7 @@ void ImeDialogUi::Draw() {
                 if (has_clipboard_text()) {
                     (void)insert_text_at_caret(ImeClipboardText());
                 }
-                edit_menu_popup = EditMenuPopup::None;
+                edit_menu_popup = OSK_EDIT_MENU_NONE;
                 break;
             default:
                 break;
@@ -1345,13 +1324,13 @@ void ImeDialogUi::Draw() {
                 copy_selected_text();
                 collapse_selection_to_caret(text_select_focus_utf16 >= 0 ? text_select_focus_utf16
                                                                          : input_cursor_utf16);
-                edit_menu_popup = EditMenuPopup::None;
+                edit_menu_popup = OSK_EDIT_MENU_NONE;
                 break;
             case 1: // Paste
                 if (has_clipboard_text()) {
                     (void)insert_text_at_caret(ImeClipboardText());
                 }
-                edit_menu_popup = EditMenuPopup::None;
+                edit_menu_popup = OSK_EDIT_MENU_NONE;
                 break;
             default:
                 break;
@@ -1359,20 +1338,18 @@ void ImeDialogUi::Draw() {
         };
 
         bool opened_menu_this_frame = false;
-        Libraries::Ime::OskShortcutRepeatState shortcut_repeat_state{
-            prev_virtual_square_down,
-            prev_virtual_l1_down,
-            prev_virtual_r1_down,
-            l2_shortcut_armed,
-            virtual_square_next_repeat_time,
-            virtual_l1_next_repeat_time,
-            virtual_r1_next_repeat_time,
-            virtual_triangle_next_repeat_time};
-        const Libraries::Ime::OskShortcutActionResult shortcut_action =
-            Libraries::Ime::EvaluateOskShortcutAction(
-                allow_osk_shortcuts, menu_modal, kb_state.pressed_action == IME_KB_KEY_ACTION_NONE,
-                panel_input, virtual_pad_input, prev_virtual_buttons, kb_layout_selection.family,
-                shortcut_repeat_state);
+        OskShortcutRepeatState shortcut_repeat_state{&prev_virtual_square_down,
+                                                     &prev_virtual_l1_down,
+                                                     &prev_virtual_r1_down,
+                                                     &l2_shortcut_armed,
+                                                     &virtual_square_next_repeat_time,
+                                                     &virtual_l1_next_repeat_time,
+                                                     &virtual_r1_next_repeat_time,
+                                                     &virtual_triangle_next_repeat_time};
+        const OskShortcutActionResult shortcut_action = EvaluateOskShortcutAction(
+            allow_osk_shortcuts, menu_modal, kb_state.pressed_action == IME_KB_KEY_ACTION_NONE,
+            &panel_input, &virtual_pad_input, prev_virtual_buttons, kb_layout_selection.family,
+            &shortcut_repeat_state);
         bool keyboard_action_from_hotkey = false;
         if (shortcut_action.clear_all) {
             (void)clear_all_text();
@@ -1385,27 +1362,27 @@ void ImeDialogUi::Draw() {
             consume_temporary_uppercase(insert_text_at_caret(kb_state.pressed_label));
             break;
         case IME_KB_KEY_ACTION_SHIFT:
-            Libraries::Ime::CycleKeyboardCaseState(kb_layout_selection);
+            CycleKeyboardCaseState(&kb_layout_selection);
             break;
         case IME_KB_KEY_ACTION_SYMBOLS_MODE:
-            Libraries::Ime::ToggleKeyboardFamilyMode(kb_layout_selection, kb_alpha_family,
-                                                     IME_KB_LAYOUT_FAMILY_SYMBOLS);
+            ToggleKeyboardFamilyMode(&kb_layout_selection, &kb_alpha_family,
+                                     IME_KB_LAYOUT_FAMILY_SYMBOLS);
             if (!keyboard_action_from_hotkey &&
-                Libraries::Ime::FocusKeyboardActionKeySelection(
-                    kb_layout_selection, IME_KB_KEY_ACTION_SYMBOLS_MODE, pending_keyboard_row,
-                    pending_keyboard_col)) {
+                FocusKeyboardActionKeySelection(&kb_layout_selection,
+                                                IME_KB_KEY_ACTION_SYMBOLS_MODE,
+                                                &pending_keyboard_row, &pending_keyboard_col)) {
                 last_keyboard_selected_row = pending_keyboard_row;
                 last_keyboard_selected_col = pending_keyboard_col;
                 panel_selection = PanelSelectionTarget::Keyboard;
             }
             break;
         case IME_KB_KEY_ACTION_SPECIALS_MODE:
-            Libraries::Ime::ToggleKeyboardFamilyMode(kb_layout_selection, kb_alpha_family,
-                                                     IME_KB_LAYOUT_FAMILY_SPECIALS);
+            ToggleKeyboardFamilyMode(&kb_layout_selection, &kb_alpha_family,
+                                     IME_KB_LAYOUT_FAMILY_SPECIALS);
             if (!keyboard_action_from_hotkey &&
-                Libraries::Ime::FocusKeyboardActionKeySelection(
-                    kb_layout_selection, IME_KB_KEY_ACTION_SPECIALS_MODE, pending_keyboard_row,
-                    pending_keyboard_col)) {
+                FocusKeyboardActionKeySelection(&kb_layout_selection,
+                                                IME_KB_KEY_ACTION_SPECIALS_MODE,
+                                                &pending_keyboard_row, &pending_keyboard_col)) {
                 last_keyboard_selected_row = pending_keyboard_row;
                 last_keyboard_selected_col = pending_keyboard_col;
                 panel_selection = PanelSelectionTarget::Keyboard;
@@ -1430,10 +1407,10 @@ void ImeDialogUi::Draw() {
             }
             break;
         case IME_KB_KEY_ACTION_PAGE_PREV:
-            Libraries::Ime::FlipKeyboardModePage(kb_layout_selection, -1);
+            FlipKeyboardModePage(&kb_layout_selection, -1);
             break;
         case IME_KB_KEY_ACTION_PAGE_NEXT:
-            Libraries::Ime::FlipKeyboardModePage(kb_layout_selection, 1);
+            FlipKeyboardModePage(&kb_layout_selection, 1);
             break;
         case IME_KB_KEY_ACTION_SPACE:
             (void)insert_text_at_caret(" ");
@@ -1449,11 +1426,11 @@ void ImeDialogUi::Draw() {
             }
             break;
         case IME_KB_KEY_ACTION_MENU:
-            if (edit_menu_popup == EditMenuPopup::None) {
+            if (edit_menu_popup == OSK_EDIT_MENU_NONE) {
                 open_main_menu();
                 opened_menu_this_frame = true;
             } else {
-                edit_menu_popup = EditMenuPopup::None;
+                edit_menu_popup = OSK_EDIT_MENU_NONE;
                 menu_activate_armed = true;
             }
             break;
@@ -1473,7 +1450,7 @@ void ImeDialogUi::Draw() {
             accept_pressed = true;
         }
 
-        if (text_select_mode && edit_menu_popup == EditMenuPopup::None &&
+        if (text_select_mode && edit_menu_popup == OSK_EDIT_MENU_NONE &&
             !pointer_navigation_active) {
             int delta = 0;
             if (nav_left || nav_up) {
@@ -1496,8 +1473,7 @@ void ImeDialogUi::Draw() {
             }
         }
 
-        if (Libraries::Ime::CloseOskEditMenuOnCancel(edit_menu_popup, cancel_pressed,
-                                                     menu_activate_armed)) {
+        if (CloseOskEditMenuOnCancel(&edit_menu_popup, &cancel_pressed, &menu_activate_armed)) {
             // Popup closed.
         } else if (text_select_mode && cancel_pressed) {
             cancel_pressed = false;
@@ -1509,21 +1485,26 @@ void ImeDialogUi::Draw() {
             apply_selection_state();
         }
 
-        if (edit_menu_popup != EditMenuPopup::None) {
+        if (edit_menu_popup != OSK_EDIT_MENU_NONE) {
             const bool clipboard_ready = has_clipboard_text();
             const auto previous_popup = edit_menu_popup;
-            (void)Libraries::Ime::DrawAndHandleOskEditMenuPopup(
-                edit_menu_popup, edit_menu_index, metrics, draw, pointer_navigation_active, nav_up,
-                nav_down, cross_down, panel_activate_pressed, opened_menu_this_frame,
-                menu_activate_armed, clipboard_ready,
-                [&](const EditMenuPopup source_popup, const int action_index) {
-                    if (source_popup == EditMenuPopup::Main) {
-                        apply_main_menu_action(action_index);
-                    } else {
-                        apply_actions_menu_action(action_index);
-                    }
-                });
-            if (edit_menu_popup != EditMenuPopup::None && edit_menu_popup != previous_popup) {
+            const auto apply_menu_action = [&](const OskEditMenuPopup source_popup,
+                                               const int action_index) {
+                if (source_popup == OSK_EDIT_MENU_MAIN) {
+                    apply_main_menu_action(action_index);
+                } else {
+                    apply_actions_menu_action(action_index);
+                }
+            };
+            (void)DrawAndHandleOskEditMenuPopup(
+                &edit_menu_popup, &edit_menu_index, &metrics, draw, pointer_navigation_active,
+                nav_up, nav_down, cross_down, panel_activate_pressed, opened_menu_this_frame,
+                &menu_activate_armed, clipboard_ready,
+                [](void* ctx, OskEditMenuPopup source_popup, int action_index) {
+                    (*static_cast<decltype(apply_menu_action)*>(ctx))(source_popup, action_index);
+                },
+                const_cast<void*>(static_cast<const void*>(&apply_menu_action)));
+            if (edit_menu_popup != OSK_EDIT_MENU_NONE && edit_menu_popup != previous_popup) {
                 opened_menu_this_frame = true;
             }
         }
@@ -1537,7 +1518,7 @@ void ImeDialogUi::Draw() {
         } else if (cancel_pressed) {
             FinishDialog(OrbisImeDialogEndStatus::UserCanceled, true, "Cancel");
         }
-        CommitOskPadInputFrame(panel_input, panel_pad_state);
+        CommitOskPadInputFrame(&panel_input, &panel_pad_state);
         lock_window_scroll();
         ovl_set_window_font_scale(1.0f);
     }
@@ -1577,8 +1558,8 @@ void ImeDialogUi::DrawInputText(const ImePanelMetrics& metrics, bool multiline) 
     ovl_push_color(OVL_COLOR_FRAME_BG, ImeColorToVec4(&state->style_config.color_text_field));
     ovl_push_color(OVL_COLOR_TEXT, ImeColorToVec4(&state->style_config.color_text));
     // The caret kept in view: the text moved left, and up on several lines, as far as it takes
-    Libraries::Ime::FollowCaretInTextField(input_size, state->current_text.begin(),
-                                           input_cursor_byte, multiline, input_scroll);
+    FollowCaretInTextField(input_size, state->current_text.begin(), input_cursor_byte, multiline,
+                           &input_scroll);
     ovl_text_field_scrolled("##ImeDialogInput", placeholder, state->current_text.begin(),
                             input_size, multiline, input_scroll, input_selection_start_byte,
                             input_selection_end_byte);

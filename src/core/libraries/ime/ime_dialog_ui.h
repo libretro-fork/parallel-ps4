@@ -8,6 +8,7 @@
 #include "common/types.h"
 #include "core/libraries/ime/ime_dialog.h"
 #include "core/libraries/ime/ime_kb_layout.h"
+#include "core/libraries/ime/ime_ui.h"
 #include "core/libraries/ime/ime_ui_shared.h"
 
 namespace Libraries::ImeDialog {
@@ -87,12 +88,6 @@ class ImeDialogUi final : public Libraries::Ime::ImeLayer {
         Keyboard = 3,
     };
 
-    enum class EditMenuPopup : u8 {
-        None = 0,
-        Main = 1,
-        Actions = 2,
-    };
-
     ImeDialogState* state{};
     OrbisImeDialogStatus* status{};
     OrbisImeDialogResult* result{};
@@ -100,7 +95,7 @@ class ImeDialogUi final : public Libraries::Ime::ImeLayer {
     bool first_render = true;
     bool accept_armed = false;
     bool pointer_navigation_active = true;
-    EditMenuPopup edit_menu_popup = EditMenuPopup::None;
+    OskEditMenuPopup edit_menu_popup = OSK_EDIT_MENU_NONE;
     bool menu_activate_armed = true;
     bool l2_shortcut_armed = true;
     bool text_select_mode = false;

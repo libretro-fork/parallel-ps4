@@ -18,6 +18,28 @@ namespace Libraries::Ime {
 class ImeHandler;
 class ImeUi;
 
+/// A keyboard on screen: drawn each frame by the overlay (ovl_ime_draw, on the presenter's
+/// thread) from when it is added until it is removed. Adding takes the pad for it; removing
+/// gives the pad back, and returns only when no frame is drawing it any more (at once when
+/// the keyboard removes itself while it is drawn), so that it can then be changed or freed.
+/// No lock (ime_support.c): the presenter's thread never waits.
+class ImeLayer {
+public:
+    ImeLayer();
+    virtual ~ImeLayer() = default;
+    ImeLayer(const ImeLayer&) = delete;
+    ImeLayer& operator=(const ImeLayer&) = delete;
+    virtual void Draw() = 0;
+
+    static void Add(ImeLayer* layer);
+    static void Remove(ImeLayer* layer);
+
+private:
+    struct Node : ime_layer_t {
+        ImeLayer* self;
+    } node;
+};
+
 class ImeState {
     friend class ImeHandler;
     friend class ImeUi;
@@ -63,12 +85,6 @@ class ImeUi : public ImeLayer {
         Keyboard = 3,
     };
 
-    enum class EditMenuPopup : u8 {
-        None = 0,
-        Main = 1,
-        Actions = 2,
-    };
-
     ImeState* state{};
     const OrbisImeParam* ime_param{};
     const OrbisImeParamExtended* extended_param{};
@@ -77,7 +93,7 @@ class ImeUi : public ImeLayer {
     bool first_render = true;
     bool accept_armed = false;
     bool pointer_navigation_active = true;
-    EditMenuPopup edit_menu_popup = EditMenuPopup::None;
+    OskEditMenuPopup edit_menu_popup = OSK_EDIT_MENU_NONE;
     bool menu_activate_armed = true;
     bool l2_shortcut_armed = true;
     bool text_select_mode = false;
