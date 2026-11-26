@@ -4,6 +4,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- **libSceNpPartner001 (EA Access) is MSVC C89** (`np/np_partner.c`, `np_partner.h`; `np_partner.cpp` and `np_partner_error.h` are gone). Its four functions and its two errors (now macros in `np_partner.h`) as they were; whether it is initialized is an atomic, where a combiner guarded a flag. Registered by `RegisterNpPartner` in `libs.cpp`; logs as before through `C_LOG_LIB_NP_PARTNER`. Not run in a game yet.
 - **Two corrections to this round's readback and texture changes** (`BufferCache::DownloadMemoryNow`, `WritebackLanding`; `TextureCache::ResolveOverlap`). Not run in a game yet.
   - A window brought back along with another on one wait for the GPU is left out where an asynchronous read back is still to land in it. That one was recorded earlier; landing afterwards it put older data over what the wait had brought and then marked the range as read back, so the game kept the older data.
   - A GPU-drawn image is taken as rewritten by the CPU, for a texture of another size at its address, only for a write in its own range (`CpuDirty`), not for `MaybeCpuDirty`, which is a write elsewhere in a page it shares: the image was then left for a new one made from its stale memory.

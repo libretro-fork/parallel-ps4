@@ -3986,6 +3986,17 @@ static void RegisterUserService(Core::Loader::SymbolsResolver* sym) {
                  sceUserServiceGetRegisteredUserIdList);
 }
 
+static void RegisterNpPartner(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("pMxXhNozUX8", "libSceNpPartner001", 1, "libSceNpPartner001",
+                 sceNpEAAccessTerminate);
+    LIB_FUNCTION("pQfYTZHznMc", "libSceNpPartner001", 1, "libSceNpPartner001",
+                 sceNpHasEAAccessSubscriptionAbortRequest);
+    LIB_FUNCTION("7CxI50-xlCk", "libSceNpPartner001", 1, "libSceNpPartner001",
+                 sceNpEAAccessInitialize);
+    LIB_FUNCTION("+OnbUs1CV0M", "libSceNpPartner001", 1, "libSceNpPartner001",
+                 sceNpHasEAAccessSubscription);
+}
+
 static void RegisterErrorDialog(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("ekXHb1kDBl0", "libSceErrorDialog", 1, "libSceErrorDialog", sceErrorDialogClose);
     LIB_FUNCTION("t2FvHRXzgqk", "libSceErrorDialog", 1, "libSceErrorDialog",
@@ -4424,7 +4435,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNpSnsFacebookDialog.sprx", Libraries::Np::NpSnsFacebookDialog::RegisterLib},
             {"libSceNpAuth.sprx", Libraries::Np::NpAuth::RegisterLib},
             {"libSceNpParty.sprx", Libraries::Np::NpParty::RegisterLib},
-            {"libSceNpPartner001.sprx", Libraries::Np::NpPartner::RegisterLib},
+            {"libSceNpPartner001.sprx", RegisterNpPartner},
             {"libSceNpTus.sprx", Libraries::Np::NpTus::RegisterLib},
             {"libSceScreenShot.sprx", RegisterScreenShot},
             {"libSceAppContent.sprx", RegisterAppContent},
