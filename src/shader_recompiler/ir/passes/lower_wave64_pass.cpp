@@ -16,12 +16,35 @@
 
 namespace Shader::Optimization {
 
-static bool IsDivergentInst(const IR::Inst* inst) {
-    switch (inst->GetOpcode()) {
-    case IR::Opcode::LaneId:
+bool IsPerLaneInst(const IR::Inst* inst) {
+    const IR::Opcode op = inst->GetOpcode();
+    if ((op >= IR::Opcode::SharedAtomicIAdd32 && op <= IR::Opcode::SharedAtomicCmpSwap64) ||
+        (op >= IR::Opcode::BufferAtomicIAdd32 && op <= IR::Opcode::BufferAtomicFCmpSwap32) ||
+        (op >= IR::Opcode::ImageAtomicIAdd32 && op <= IR::Opcode::ImageAtomicCmpSwap32)) {
+        // What an atomic returns differs from one invocation to the next
         return true;
-    case IR::Opcode::GetAttributeU32:
-        return inst->Arg(0).Attribute() == IR::Attribute::LocalInvocationId;
+    }
+    switch (op) {
+    case IR::Opcode::LaneId:
+    case IR::Opcode::MaskedBitCount32:
+    case IR::Opcode::WriteLane:
+    case IR::Opcode::InverseBallot:
+        return true;
+    // A host subgroup's own: a workgroup of a wave of 64 is two subgroups of 32 here, and with
+    // fewer than 64 invocations a ballot of the same condition differs between the two. What is
+    // lowered through shared memory is in uniform_insts. (A lane read, a shuffle or an any of a
+    // value the same everywhere is that value: the search goes on to the value.)
+    case IR::Opcode::Ballot:
+    // Each host subgroup appends, or consumes, for itself
+    case IR::Opcode::DataAppend:
+    case IR::Opcode::DataConsume:
+        return true;
+    case IR::Opcode::GetAttributeU32: {
+        const IR::Attribute attr = inst->Arg(0).Attribute();
+        return attr == IR::Attribute::LocalInvocationId ||
+               attr == IR::Attribute::LocalInvocationIndex ||
+               attr == IR::Attribute::GlobalInvocationId;
+    }
     default:
         return false;
     }
@@ -40,11 +63,13 @@ static bool IsDivergentCondition(const IR::U1& condition,
     while (!queue.empty()) {
         const IR::Inst* inst = queue.front();
         queue.pop();
-        if (IsDivergentInst(inst)) {
-            return true;
-        }
+        // A lowered lane read or ballot is the same in the whole workgroup, though it is one of
+        // the instructions that would otherwise be per lane
         if (uniform_insts && uniform_insts->contains(inst)) {
             continue;
+        }
+        if (IsPerLaneInst(inst)) {
+            return true;
         }
         for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
             const IR::Inst* arg_inst = inst->Arg(arg).TryInst();

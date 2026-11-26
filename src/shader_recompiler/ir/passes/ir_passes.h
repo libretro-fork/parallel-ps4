@@ -20,6 +20,10 @@ void SsaRewritePass(IR::Program& program);
 void SsaRepairPass(IR::Program& program);
 void PhiSimplificationPass(IR::Program& program);
 void InverseBallotEliminationPass(IR::Program& program);
+/// Whether an instruction's result can differ between invocations of one workgroup whatever its
+/// arguments are: the invocation's index, a per-lane mask count, what an atomic returns, and the
+/// subgroup operations a workgroup of two host subgroups gives two different results for.
+bool IsPerLaneInst(const IR::Inst* inst);
 /// Blocks every thread of a workgroup goes through together. uniform_insts are taken to have the
 /// same result in the whole workgroup.
 std::vector<IR::Block*> FindWave64UniformBlocks(

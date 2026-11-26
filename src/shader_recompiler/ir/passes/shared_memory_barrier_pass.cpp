@@ -93,14 +93,18 @@ static bool IsDivergent(const IR::U1& cond, const DivergenceContext& ctx) {
     while (!queue.empty()) {
         const IR::Inst* inst = queue.front();
         queue.pop();
-        if (inst->GetOpcode() == IR::Opcode::GetAttributeU32 &&
-            inst->Arg(0).Attribute() == IR::Attribute::LocalInvocationId &&
-            ctx.runtime_info.hw.cs.workgroup_size[inst->Arg(1).U32()] > 1) {
-            return true;
-        }
         if (inst->GetOpcode() == IR::Opcode::ReadLane && inst->Arg(1).IsImmediate() &&
             ctx.uniform_readlane_blocks.contains(inst->GetParent())) {
             continue;
+        }
+        if (inst->GetOpcode() == IR::Opcode::GetAttributeU32 &&
+            inst->Arg(0).Attribute() == IR::Attribute::LocalInvocationId) {
+            // A dimension of one has the same id in every invocation
+            if (ctx.runtime_info.hw.cs.workgroup_size[inst->Arg(1).U32()] > 1) {
+                return true;
+            }
+        } else if (IsPerLaneInst(inst)) {
+            return true;
         }
         for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
             const IR::Inst* arg_inst = inst->Arg(arg).TryInst();

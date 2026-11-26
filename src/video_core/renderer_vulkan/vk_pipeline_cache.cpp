@@ -298,9 +298,12 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
         // depth, stencil reference or sample mask export, which the tests need.
         {
             const AmdGpu::ZOrder z_order = regs.depth_shader_control.z_order;
+            // EXEC_ON_HIER_FAIL and EXEC_ON_NOOP ask for the shader to run even where the
+            // tests reject the pixel, for what it writes besides its colour: then it must
             info.hw.fs.early_z =
                 (z_order == AmdGpu::ZOrder::EarlyZLateZ || z_order == AmdGpu::ZOrder::EarlyZReZ) &&
-                (info.hw.fs.mrtz_mask & 0x7) == 0;
+                (info.hw.fs.mrtz_mask & 0x7) == 0 && !regs.depth_shader_control.exec_on_hier_fail &&
+                !regs.depth_shader_control.exec_on_noop;
         }
         const AmdGpu::BlendControl& cb0_blend = regs.blend_control[0];
         if (cb0_blend.enable) {
