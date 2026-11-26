@@ -209,6 +209,16 @@ private:
     bool attachment_feedback_loop{};
     // The scale the bound targets are made at on the GPU (Image::scale_num / scale_den),
     // which the viewports and scissors follow
+    /// With precise readbacks the GPU is given what has been recorded every so many draws and
+    /// dispatches, at a dispatch, where no pass is open. See FlushEarly.
+    static constexpr u32 EarlyFlushCommands = 256;
+    const bool early_flush;
+    u64 commands_tick{};
+    u32 commands_since_submit{};
+    /// Counts a draw or dispatch recorded since the last submit
+    u32 CountCommand();
+    void FlushEarly();
+
     u32 target_scale_num = 1;
     u32 target_scale_den = 1;
     bool needs_barrier{};

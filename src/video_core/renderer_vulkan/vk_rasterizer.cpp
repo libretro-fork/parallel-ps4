@@ -47,7 +47,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
       pipeline_cache{instance, scheduler, liverpool, buffer_cache.GetSparsePageShift()},
       host_markers_enabled{emu_settings_get_vkhost_markers()},
-      guest_markers_enabled{emu_settings_get_vkguest_markers()} {
+      guest_markers_enabled{emu_settings_get_vkguest_markers()},
+      early_flush{emu_settings_get_readbacks_mode() == EMU_READBACKS_PRECISE &&
+                  instance_.GetDriverID() == VK_DRIVER_ID_NVIDIA_PROPRIETARY} {
     if (!emu_settings_get_null_gpu()) {
         liverpool->BindRasterizer(this);
     }
@@ -381,6 +383,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     }
 
     ResetBindings(false);
+    if (early_flush) {
+        CountCommand();
+    }
     if (!capture_textures.empty()) [[unlikely]] {
         DumpCapturedTextures();
     }
@@ -467,6 +472,9 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     }
 
     ResetBindings(false);
+    if (early_flush) {
+        CountCommand();
+    }
     if (!capture_textures.empty()) [[unlikely]] {
         DumpCapturedTextures();
     }
@@ -475,6 +483,9 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 void Rasterizer::DispatchDirect() {
 
     scheduler.PopPendingOperations();
+    if (early_flush) {
+        FlushEarly();
+    }
 
     const AmdGpu::ComputeProgram& cs_program = liverpool->GetCsRegs();
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
@@ -513,6 +524,9 @@ void Rasterizer::DispatchDirect() {
 void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
 
     scheduler.PopPendingOperations();
+    if (early_flush) {
+        FlushEarly();
+    }
 
     const AmdGpu::ComputeProgram& cs_program = liverpool->GetCsRegs();
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
@@ -546,6 +560,29 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     if (!capture_textures.empty()) [[unlikely]] {
         DumpCapturedTextures();
     }
+}
+
+u32 Rasterizer::CountCommand() {
+    const u64 tick = scheduler.CurrentTick();
+    if (tick != commands_tick) {
+        commands_tick = tick;
+        commands_since_submit = 0;
+    }
+    return ++commands_since_submit;
+}
+
+void Rasterizer::FlushEarly() {
+    // A precise readback waits for all the GPU has been given. Between readbacks the GPU only got
+    // work when one submitted, and sat idle while the command processor recorded; then the next
+    // readback waited for all of that at once. Handing it over as it is recorded lets the GPU
+    // work meanwhile, so the wait is shorter. Only at a dispatch, where no pass is open: a
+    // submit inside a pass would cut it in two. On NVIDIA only, where the Shadow of the Colossus
+    // PC port measured it; it is not known to help elsewhere.
+    if (CountCommand() < EarlyFlushCommands) {
+        return;
+    }
+    scheduler.EndRendering();
+    scheduler.Flush();
 }
 
 u64 Rasterizer::Flush() {
