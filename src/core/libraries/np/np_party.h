@@ -1,47 +1,52 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+/* libSceNpParty: no one is in a party here. The functions that ask about one say so; the rest
+ * do nothing. */
+
+#ifndef SHADPS4_LIBRARIES_NP_PARTY_H
+#define SHADPS4_LIBRARIES_NP_PARTY_H
 
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-namespace Libraries::Np::NpParty {
+/* OrbisNpPartyState */
+#define ORBIS_NP_PARTY_STATE_NOT_IN_PARTY 2
+#define ORBIS_NP_PARTY_STATE_IN_PRIVATE_PARTY 3
+typedef u16 OrbisNpPartyState;
 
-enum class OrbisNpPartyState : u16 {
-    NotInParty = 2,
-    InPrivateParty = 3,
-};
-
-s32 PS4_SYSV_ABI sceNpPartyCheckCallback();
-s32 PS4_SYSV_ABI sceNpPartyCreate();
-s32 PS4_SYSV_ABI sceNpPartyCreateA();
-s32 PS4_SYSV_ABI sceNpPartyGetId();
-s32 PS4_SYSV_ABI sceNpPartyGetMemberInfo();
-s32 PS4_SYSV_ABI sceNpPartyGetMemberInfoA();
-s32 PS4_SYSV_ABI sceNpPartyGetMembers();
-s32 PS4_SYSV_ABI sceNpPartyGetMembersA();
-s32 PS4_SYSV_ABI sceNpPartyGetMemberSessionInfo();
-s32 PS4_SYSV_ABI sceNpPartyGetMemberVoiceInfo();
+s32 PS4_SYSV_ABI sceNpPartyCheckCallback(void);
+s32 PS4_SYSV_ABI sceNpPartyCreate(void);
+s32 PS4_SYSV_ABI sceNpPartyCreateA(void);
+s32 PS4_SYSV_ABI sceNpPartyGetId(void);
+s32 PS4_SYSV_ABI sceNpPartyGetMemberInfo(void);
+s32 PS4_SYSV_ABI sceNpPartyGetMemberInfoA(void);
+s32 PS4_SYSV_ABI sceNpPartyGetMembers(void);
+s32 PS4_SYSV_ABI sceNpPartyGetMembersA(void);
+s32 PS4_SYSV_ABI sceNpPartyGetMemberSessionInfo(void);
+s32 PS4_SYSV_ABI sceNpPartyGetMemberVoiceInfo(void);
 s32 PS4_SYSV_ABI sceNpPartyGetState(OrbisNpPartyState* state);
-s32 PS4_SYSV_ABI sceNpPartyGetStateAsUser();
-s32 PS4_SYSV_ABI sceNpPartyGetStateAsUserA();
-s32 PS4_SYSV_ABI sceNpPartyGetVoiceChatPriority();
-s32 PS4_SYSV_ABI sceNpPartyInitialize();
-s32 PS4_SYSV_ABI sceNpPartyJoin();
-s32 PS4_SYSV_ABI sceNpPartyLeave();
-s32 PS4_SYSV_ABI sceNpPartyRegisterHandler();
-s32 PS4_SYSV_ABI sceNpPartyRegisterHandlerA();
-s32 PS4_SYSV_ABI sceNpPartyRegisterPrivateHandler();
-s32 PS4_SYSV_ABI sceNpPartySendBinaryMessage();
-s32 PS4_SYSV_ABI sceNpPartySetVoiceChatPriority();
-s32 PS4_SYSV_ABI sceNpPartyShowInvitationList();
-s32 PS4_SYSV_ABI sceNpPartyShowInvitationListA();
-s32 PS4_SYSV_ABI sceNpPartyTerminate();
-s32 PS4_SYSV_ABI sceNpPartyUnregisterPrivateHandler();
+s32 PS4_SYSV_ABI sceNpPartyGetStateAsUser(void);
+s32 PS4_SYSV_ABI sceNpPartyGetStateAsUserA(void);
+s32 PS4_SYSV_ABI sceNpPartyGetVoiceChatPriority(void);
+s32 PS4_SYSV_ABI sceNpPartyInitialize(void);
+s32 PS4_SYSV_ABI sceNpPartyJoin(void);
+s32 PS4_SYSV_ABI sceNpPartyLeave(void);
+s32 PS4_SYSV_ABI sceNpPartyRegisterHandler(void);
+s32 PS4_SYSV_ABI sceNpPartyRegisterHandlerA(void);
+s32 PS4_SYSV_ABI sceNpPartyRegisterPrivateHandler(void);
+s32 PS4_SYSV_ABI sceNpPartySendBinaryMessage(void);
+s32 PS4_SYSV_ABI sceNpPartySetVoiceChatPriority(void);
+s32 PS4_SYSV_ABI sceNpPartyShowInvitationList(void);
+s32 PS4_SYSV_ABI sceNpPartyShowInvitationListA(void);
+s32 PS4_SYSV_ABI sceNpPartyTerminate(void);
+s32 PS4_SYSV_ABI sceNpPartyUnregisterPrivateHandler(void);
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Np::NpParty
+#ifdef __cplusplus
+}
+#endif
+
+#endif

@@ -3986,6 +3986,49 @@ static void RegisterUserService(Core::Loader::SymbolsResolver* sym) {
                  sceUserServiceGetRegisteredUserIdList);
 }
 
+static void RegisterNpParty(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("3e4k2mzLkmc", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCheckCallback);
+    LIB_FUNCTION("nOZRy-slBoA", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCreate);
+    LIB_FUNCTION("XQSUbbnpPBA", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCreateA);
+    LIB_FUNCTION("DRA3ay-1DFQ", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetId);
+    LIB_FUNCTION("F1P+-wpxQow", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetMemberInfo);
+    LIB_FUNCTION("v2RYVGrJDkM", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetMemberInfoA);
+    LIB_FUNCTION("T2UOKf00ZN0", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetMembers);
+    LIB_FUNCTION("TaNw7W25QJw", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetMembersA);
+    LIB_FUNCTION("4gOMfNYzllw", "libSceNpParty", 1, "libSceNpParty",
+                 sceNpPartyGetMemberSessionInfo);
+    LIB_FUNCTION("EKi1jx59SP4", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetMemberVoiceInfo);
+    LIB_FUNCTION("aEzKdJzATZ0", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetState);
+    LIB_FUNCTION("o7grRhiGHYI", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetStateAsUser);
+    LIB_FUNCTION("EjyAI+QNgFw", "libSceNpParty", 1, "libSceNpParty", sceNpPartyGetStateAsUserA);
+    LIB_FUNCTION("-lc6XZnQXvM", "libSceNpParty", 1, "libSceNpParty",
+                 sceNpPartyGetVoiceChatPriority);
+    LIB_FUNCTION("lhYCTQmBkds", "libSceNpParty", 1, "libSceNpParty", sceNpPartyInitialize);
+    LIB_FUNCTION("RXNCDw2GDEg", "libSceNpParty", 1, "libSceNpParty", sceNpPartyJoin);
+    LIB_FUNCTION("J8jAi-tfJHc", "libSceNpParty", 1, "libSceNpParty", sceNpPartyLeave);
+    LIB_FUNCTION("kA88gbv71ao", "libSceNpParty", 1, "libSceNpParty", sceNpPartyRegisterHandler);
+    LIB_FUNCTION("+v4fVHMwFWc", "libSceNpParty", 1, "libSceNpParty", sceNpPartyRegisterHandlerA);
+    LIB_FUNCTION("zo4G5WWYpKg", "libSceNpParty", 1, "libSceNpParty",
+                 sceNpPartyRegisterPrivateHandler);
+    LIB_FUNCTION("U6VdUe-PNAY", "libSceNpParty", 1, "libSceNpParty", sceNpPartySendBinaryMessage);
+    LIB_FUNCTION("nazKyHygHhY", "libSceNpParty", 1, "libSceNpParty",
+                 sceNpPartySetVoiceChatPriority);
+    LIB_FUNCTION("-MFiL7hEnPE", "libSceNpParty", 1, "libSceNpParty", sceNpPartyShowInvitationList);
+    LIB_FUNCTION("yARHEYLajs0", "libSceNpParty", 1, "libSceNpParty", sceNpPartyShowInvitationListA);
+    LIB_FUNCTION("oLYkibiHqRA", "libSceNpParty", 1, "libSceNpParty", sceNpPartyTerminate);
+    LIB_FUNCTION("zQ7gIvt11Pc", "libSceNpParty", 1, "libSceNpParty",
+                 sceNpPartyUnregisterPrivateHandler);
+    LIB_FUNCTION("nOZRy-slBoA", "libSceNpPartyCompat", 1, "libSceNpParty", sceNpPartyCreate);
+    LIB_FUNCTION("F1P+-wpxQow", "libSceNpPartyCompat", 1, "libSceNpParty", sceNpPartyGetMemberInfo);
+    LIB_FUNCTION("T2UOKf00ZN0", "libSceNpPartyCompat", 1, "libSceNpParty", sceNpPartyGetMembers);
+    LIB_FUNCTION("o7grRhiGHYI", "libSceNpPartyCompat", 1, "libSceNpParty",
+                 sceNpPartyGetStateAsUser);
+    LIB_FUNCTION("kA88gbv71ao", "libSceNpPartyCompat", 1, "libSceNpParty",
+                 sceNpPartyRegisterHandler);
+    LIB_FUNCTION("-MFiL7hEnPE", "libSceNpPartyCompat", 1, "libSceNpParty",
+                 sceNpPartyShowInvitationList);
+}
+
 static void RegisterNpSnsFacebookDialog(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("fjV7C8H0Y8k", "libSceNpSnsFacebookDialog", 1, "libSceNpSnsFacebookDialog",
                  sceNpSnsFacebookDialogUpdateStatus);
@@ -4439,7 +4482,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNpProfileDialog.sprx", Libraries::Np::NpProfileDialog::RegisterLib},
             {"libSceNpSnsFacebookDialog.sprx", RegisterNpSnsFacebookDialog},
             {"libSceNpAuth.sprx", Libraries::Np::NpAuth::RegisterLib},
-            {"libSceNpParty.sprx", Libraries::Np::NpParty::RegisterLib},
+            {"libSceNpParty.sprx", RegisterNpParty},
             {"libSceNpPartner001.sprx", RegisterNpPartner},
             {"libSceNpTus.sprx", Libraries::Np::NpTus::RegisterLib},
             {"libSceScreenShot.sprx", RegisterScreenShot},
