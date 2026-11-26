@@ -459,7 +459,8 @@ static bool InHostModule(u64 address) {
 #if defined(_M_X64) || defined(__x86_64__)
 // The game's callers above a frame of its code, by its frame pointers (it is built with them):
 // the unwind tables end where the game's code starts. @shown says whether any was found.
-static int LogGameCallers(u64 rbp, const char* indent, int depth, int limit) {
+static int LogGameCallers(u64 rbp, const char* indent, int depth, int limit,
+                          u64* callers = nullptr) {
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     int shown = 0;
     for (; shown < limit; ++shown) {
@@ -469,6 +470,9 @@ static int LogGameCallers(u64 rbp, const char* indent, int depth, int limit) {
             break;
         }
         LOG_CRITICAL(Debug, "%s#%d %s", indent, depth + shown, (DescribeAddress(frame[1])).c_str());
+        if (callers) {
+            callers[shown] = frame[1];
+        }
         if (frame[0] <= rbp) {
             break; // a caller's frame is above its callee's
         }
@@ -534,6 +538,16 @@ static void LogMemory(u64 start, u64 length) {
             LOG_CRITICAL(Debug, "    0x%" PRIx64 ": %s", at, line);
         }
     }
+}
+
+// The game's instructions up to and after @address: where a register's value came from is in
+// the code before the one that crashed, and before each call above it. More before than after,
+// and from a line's start, so two runs line up.
+static void LogCode(const char* what, u64 address) {
+    static constexpr u64 Before = 0x100, After = 0x40;
+    const u64 start = (address - Before) & ~u64{HEX_DUMP_LINE_BYTES - 1};
+    LOG_CRITICAL(Debug, "  code around %s = 0x%" PRIx64 ":", what, address);
+    LogMemory(start, address + After - start);
 }
 
 // When an argument of the call that crashed points into packed data (a compressed or encoded
@@ -726,10 +740,20 @@ static LONG WINAPI CrashReport(EXCEPTION_POINTERS* info) noexcept {
     // What is written so far is in the log whatever becomes of the rest
     Common::Log::Flush();
     // The game's own callers above that, and what the registers point at
+    static constexpr int CodeCallers = 4;
+    u64 callers[16] = {};
+    int caller_count = 0;
     if (!InHostModule(frame.Rip)) {
-        LogGameCallers(frame.Rbp, "  ", depth + 1, 16);
+        caller_count = LogGameCallers(frame.Rbp, "  ", depth + 1, 16, callers);
     }
     LogMemoryAroundRegisters(ctx);
+    // The game's code where it crashed and where it was called from
+    if (!InHostModule(ctx.Rip)) {
+        LogCode("rip", ctx.Rip);
+        for (int i = 0; i < caller_count && i < CodeCallers; i++) {
+            LogCode("a caller's return", callers[i]);
+        }
+    }
     LogPackedRun("rdi", ctx.Rdi);
     LogPackedRun("rsi", ctx.Rsi);
     Common::Log::Flush();
