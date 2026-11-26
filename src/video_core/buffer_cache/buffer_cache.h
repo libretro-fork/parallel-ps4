@@ -13,8 +13,10 @@
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
+#include "video_core/buffer_cache/hot_windows.h"
 #include "video_core/buffer_cache/range_set.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
+#include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/image.h"
 
 struct write_snapshots;
@@ -194,6 +196,23 @@ private:
 
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async);
 
+    /// A download recorded and not yet landed
+    struct PendingDownload {
+        VAddr arena_base{};
+        VAddr addr{};
+        u64 size{};
+        Vulkan::StagingBufferRef download{};
+        Common::SmallVector<VkBufferCopy, 1> copies;
+    };
+
+    /// Records the copies that bring what the GPU wrote in [@device_addr, @device_addr + @size)
+    /// back, without waiting for them. False when there is nothing to bring.
+    bool RecordDownload(const Buffer* arena, VAddr device_addr, u64 size, PendingDownload& pending);
+
+    /// Downloads a window the game is waiting to read, and on the same wait for the GPU the
+    /// other windows it has lately read (hot_windows.h)
+    void DownloadMemoryNow(const Buffer* arena, VAddr window, u64 size);
+
     /// Writes what DownloadMemory read back through @download into the game's memory, once the
     /// GPU is done with it
     void LandDownload(VAddr arena_base, VAddr device_addr, u64 size,
@@ -257,6 +276,13 @@ private:
     u64 NUM_ARENA_PAGES{u64{1} << (ADDRESS_SPACE_BITS - DEFAULT_ARENA_PAGE_BITS)};
     /// The arena over each arena page, null where there is none yet (NUM_ARENA_PAGES of them)
     const Buffer** address_space{};
+
+    /// The width a read back is widened to
+    static constexpr u64 ReadbackWindow = 512ULL << 10;
+    /// The other windows one wait for the GPU brings along at most
+    static constexpr u32 MaxHotDownloads = 32;
+    hot_windows_t hot_windows{};
+    PendingDownload pending_downloads[MaxHotDownloads + 1];
     /// Every arena made, freed with the cache
     Buffer** arenas{};
     u32 num_arenas{};

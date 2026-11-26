@@ -472,14 +472,101 @@ void BufferCache::FlushRegion(VAddr device_addr, u64 size, bool is_write, bool a
 
     // GPU-modified ranges come as many small scattered islands,
     // so the download is widened to a window around the request
-    constexpr u64 WindowSize = 512_KB;
     const VAddr arena_end = arena->cpu_addr + arena->size_bytes;
-    const VAddr window_start = MaxU64(Common::AlignDown(device_addr, WindowSize), arena->cpu_addr);
+    const VAddr window_start =
+        MaxU64(Common::AlignDown(device_addr, ReadbackWindow), arena->cpu_addr);
     const VAddr window_end =
-        MinU64(MaxU64(window_start + WindowSize, device_addr + size), arena_end);
-    DownloadMemory(arena, window_start, window_end - window_start, async);
+        MinU64(MaxU64(window_start + ReadbackWindow, device_addr + size), arena_end);
+    if (async) {
+        DownloadMemory(arena, window_start, window_end - window_start, true);
+    } else {
+        DownloadMemoryNow(arena, window_start, window_end - window_start);
+    }
     if (is_write) {
         memory_tracker->MarkRegionAsCpuModified(device_addr, size);
+    }
+}
+
+bool BufferCache::RecordDownload(const Buffer* arena, VAddr device_addr, u64 size,
+                                 PendingDownload& pending) {
+    // Each copy first with where in the game's memory it goes as its destination
+    Common::SmallVector<VkBufferCopy, 1>& copies = pending.copies;
+    copies.clear();
+    const VAddr arena_base = arena->cpu_addr;
+    memory_tracker->ForEachDownloadRange<false>(device_addr, size, [&](u64 address, u64 size) {
+        gpu_modified_ranges.ForEachInRange(address, size, [&](VAddr start, VAddr end) {
+            copies.push_back(VkBufferCopy{start - arena_base, start, end - start});
+        });
+        gpu_modified_ranges.Subtract(address, size);
+    });
+    if (copies.empty()) {
+        return false;
+    }
+    pending.arena_base = arena_base;
+    pending.addr = device_addr;
+    pending.size = size;
+    pending.download = {};
+    // Straight into the game's memory where it is lent to the GPU, the rest through staging
+    CopyToGuest(arena, copies);
+    u64 total_size_bytes = 0;
+    for (VkBufferCopy& copy : copies) {
+        copy.dstOffset = total_size_bytes;
+        // Align up to avoid cache conflicts
+        constexpr u64 align = 64ULL;
+        constexpr u64 mask = ~(align - 1ULL);
+        total_size_bytes += (copy.size + align - 1) & mask;
+    }
+    if (total_size_bytes != 0) {
+        pending.download =
+            staging_pool.Request(total_size_bytes, VideoCore::MemoryType::HostCached, 16, false);
+        for (VkBufferCopy& copy : copies) {
+            copy.dstOffset += pending.download.offset;
+        }
+        runtime.CopyBuffer(arena, pending.download.buffer, copies.data(),
+                           static_cast<u32>(copies.size()));
+    }
+    return true;
+}
+
+void BufferCache::DownloadMemoryNow(const Buffer* arena, VAddr window, u64 size) {
+    u32 num = 0;
+    if (!RecordDownload(arena, window, size, pending_downloads[num])) {
+        return;
+    }
+    ++num;
+    // The game waits for the GPU here. It reads the same few stretches back every frame, one
+    // after another, so the others it has lately read, where the GPU has written since, come
+    // along on this wait: the reads that follow find their data there and wait for nothing.
+    // Their pages are still kept from the game, so what lands is what a read of its own would
+    // have brought.
+    hot_windows_note(&hot_windows, window);
+    u64 others[MaxHotDownloads];
+    const u32 num_others = hot_windows_collect(&hot_windows, window, others, MaxHotDownloads);
+    for (u32 i = 0; i < num_others; ++i) {
+        const VAddr other = others[i];
+        // Only in an arena there already is: none is made or moved for this
+        const u64 first_page = other >> ARENA_PAGE_BITS;
+        const u64 last_page = (other + ReadbackWindow - 1) >> ARENA_PAGE_BITS;
+        const Buffer* const other_arena =
+            first_page < NUM_ARENA_PAGES ? address_space[first_page] : nullptr;
+        if (!other_arena || other < other_arena->cpu_addr ||
+            (last_page < NUM_ARENA_PAGES ? address_space[last_page] : nullptr) != other_arena) {
+            continue;
+        }
+        const u64 other_size =
+            MinU64(other + ReadbackWindow, other_arena->cpu_addr + other_arena->size_bytes) - other;
+        if (!memory_tracker->IsRegionGpuModified(other, other_size)) {
+            continue;
+        }
+        if (RecordDownload(other_arena, other, other_size, pending_downloads[num])) {
+            ++num;
+        }
+    }
+    scheduler.Finish();
+    for (u32 i = 0; i < num; ++i) {
+        const PendingDownload& pending = pending_downloads[i];
+        LandDownload(pending.arena_base, pending.addr, pending.size, pending.download, false, -1,
+                     pending.copies.data(), static_cast<u32>(pending.copies.size()));
     }
 }
 
