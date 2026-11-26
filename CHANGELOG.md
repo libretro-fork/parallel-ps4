@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Windows: a game's TLS read that the static CPU patching did not reach, which Windows raises as a privileged instruction, is patched where it is as an illegal instruction is, with the red-zone option off too. It ended Bloodborne at 60 frames a second on going back to the Hunter's Dream (a Havok worker's first run of such a function). Not run in the game yet.
+
 - libSceCoredump is MSVC C89 (kernel/coredump/coredump.c), registered in kernel.cpp, with a kernel log class in the C bridge. It still only keeps the game's handler. Not run in a game yet.
 
 - Patch Manager: patches can be a group, one option to pick one of them from, and a patch can have rates, one choice for each, its values worked out from the rate picked (common/patch_rate.c, MSVC C89: formulas such as 1/N or 0.65^(30/N), written as a float, an integer or decimal text). A patch that sets the game's frame rate makes the core run at it: the frontend's frame rate, the game's time, the console's vblanks and the sound a frame follow it, so a rate above 60 is shown at that rate. "Match display" takes the display's refresh rate. Not run in a game yet.

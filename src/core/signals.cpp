@@ -82,11 +82,13 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
         static_protection_exception = true; // Windows static guest red-zone protection
         handled = signals->DispatchIllegalInstruction(pExp);
         break;
-    case EXCEPTION_PRIV_INSTRUCTION: // Windows static guest red-zone protection
-        if (use_static_windows_guest_red_zone_protection) {
-            static_protection_exception = true;
-            handled = signals->DispatchIllegalInstruction(pExp);
-        }
+    case EXCEPTION_PRIV_INSTRUCTION:
+        // The red-zone protection's own trap, and a game's TLS read (mov reg, fs:[0]) that the
+        // static pass did not reach (a function the EH frame table does not list): Windows
+        // raises it as a privileged instruction, and it is patched where it is as an illegal
+        // one would be. Bloodborne's Havok runs such a function only at 60 frames a second.
+        static_protection_exception = true;
+        handled = signals->DispatchIllegalInstruction(pExp);
         break;
     case EXCEPTION_IN_PAGE_ERROR:
         guest_info._si_signo = POSIX_SIGBUS;
