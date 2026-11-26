@@ -150,6 +150,13 @@ static int patch_catalog_read(patch_catalog_t* cat, unsigned* cap, struct rxml_n
             e->author = rxml_node_attrib(node, "Author");
             e->note = rxml_node_attrib(node, "Note");
             e->repository = repository;
+            e->group = rxml_node_attrib(node, "Group");
+            e->choice = rxml_node_attrib(node, "Choice");
+            e->rates = rxml_node_attrib(node, "Rates");
+            {
+                const char* frame_rate = rxml_node_attrib(node, "FrameRate");
+                e->frame_rate = frame_rate && strcmp(frame_rate, "1") == 0;
+            }
             patch_catalog_key(e->key, sizeof(e->key), serial, name);
             entry = (int)cat->count++;
         } else {
@@ -220,6 +227,36 @@ int patch_catalog_build(patch_catalog_t* cat, const patch_catalog_source_t* sour
             return 0;
     }
     return 1;
+}
+
+void patch_catalog_each_rate(const char* rates, void (*fn)(void* ctx, unsigned rate), void* ctx) {
+    const char* p = rates;
+    if (!p)
+        return;
+    while (*p) {
+        const char* end = p;
+        while (*end && *end != ',')
+            end++;
+        while (p < end && *p == ' ')
+            p++;
+        if ((size_t)(end - p) >= 7 && strncmp(p, "display", 7) == 0) {
+            fn(ctx, 0);
+        } else {
+            unsigned long rate = 0;
+            const char* d = p;
+            while (d < end && *d >= '0' && *d <= '9') {
+                rate = rate * 10 + (unsigned long)(*d - '0');
+                if (rate > 1000)
+                    break;
+                d++;
+            }
+            while (d < end && *d == ' ')
+                d++;
+            if (d == end && d != p && rate >= 1 && rate <= 1000)
+                fn(ctx, (unsigned)rate);
+        }
+        p = *end ? end + 1 : end;
+    }
 }
 
 void patch_catalog_free(patch_catalog_t* cat) {

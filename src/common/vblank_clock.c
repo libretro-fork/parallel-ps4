@@ -3,9 +3,10 @@
 
 #include "common/vblank_clock.h"
 
-void vblank_clock_init(vblank_clock_t* clock, unsigned ticks, unsigned hz) {
+void vblank_clock_init(vblank_clock_t* clock, unsigned ticks, unsigned hz, unsigned tick_hz) {
     clock->base_ticks = ticks;
-    clock->hz = hz ? hz : VBLANK_CLOCK_TICK_HZ;
+    clock->tick_hz = tick_hz ? (tick_hz > 1000 ? 1000 : tick_hz) : VBLANK_CLOCK_TICK_HZ;
+    clock->hz = hz ? hz : clock->tick_hz;
     clock->done = 0;
 }
 
@@ -13,15 +14,15 @@ void vblank_clock_init(vblank_clock_t* clock, unsigned ticks, unsigned hz) {
 static long vblank_clock_due(const vblank_clock_t* clock, unsigned elapsed) {
     /* elapsed * hz in two parts, so that neither overflows a long of 32 bits (elapsed is
      * kept under 2^28 ticks, and hz under 2^10) */
-    const long whole = (long)(elapsed / VBLANK_CLOCK_TICK_HZ) * (long)clock->hz;
-    const long part = (long)((elapsed % VBLANK_CLOCK_TICK_HZ) * clock->hz / VBLANK_CLOCK_TICK_HZ);
+    const long whole = (long)(elapsed / clock->tick_hz) * (long)clock->hz;
+    const long part = (long)((elapsed % clock->tick_hz) * clock->hz / clock->tick_hz);
     return whole + part;
 }
 
 unsigned vblank_clock_owed(vblank_clock_t* clock, unsigned ticks, unsigned hz) {
     long due, max_owed;
     if (!hz)
-        hz = VBLANK_CLOCK_TICK_HZ;
+        hz = clock->tick_hz;
     else if (hz > 1000)
         hz = 1000;
     if (hz != clock->hz) {
@@ -32,7 +33,7 @@ unsigned vblank_clock_owed(vblank_clock_t* clock, unsigned ticks, unsigned hz) {
         clock->hz = hz;
     }
     due = vblank_clock_due(clock, ticks - clock->base_ticks);
-    max_owed = (long)(hz / VBLANK_CLOCK_TICK_HZ) + (long)VBLANK_CLOCK_MAX_OWED;
+    max_owed = (long)(hz / clock->tick_hz) + (long)VBLANK_CLOCK_MAX_OWED;
     if (due - clock->done > max_owed)
         clock->done = due - max_owed;
     /* Far on, the count restarts at this tick, what is owed carried over, before the

@@ -172,8 +172,9 @@ static void parallel_patches(int argc, char** argv) {
          * finds where FMOD's own code sets the two (the block's length, then all the blocks'
          * together) and writes 512 over the 1024: the bytes are each game's own. */
         entry = find(&cat, "Lower Audio Latency");
-        /* Bloodborne has three more: the Model Detail patches */
-        CHECK(entry >= 0 && cat.count == (f == 0 ? 5u : 2u), "its patches");
+        /* Bloodborne has six more: the Model Detail patches and the Frame Rate
+         * group's */
+        CHECK(entry >= 0 && cat.count == (f == 0 ? 8u : 2u), "its patches");
         if (f == 0) {
             static const char* const detail[] = {"Highest Model Detail Everywhere",
                                                  "Lower Model Detail Everywhere",
@@ -183,6 +184,31 @@ static void parallel_patches(int argc, char** argv) {
                 const int lod = find(&cat, detail[d]);
                 CHECK(lod >= 0 && cat.entries[lod].versions[0] == '\0',
                       "a model detail patch, for every version");
+            }
+            {
+              /* The Frame Rate group: the rated patch sets the frame rate, at
+               * 144 and the display's among its rates */
+              const int rate = find(&cat, "Frame Rate");
+              const int uncapped = find(&cat, "Uncapped Frame Rate");
+              const int thirty = find(&cat, "Frame Rate 30, Lower Input Delay");
+              CHECK(rate >= 0 && uncapped >= 0 && thirty >= 0,
+                    "the frame rate patches");
+              if (rate >= 0 && uncapped >= 0 && thirty >= 0) {
+                CHECK(strcmp(cat.entries[rate].group, "Frame Rate") == 0 &&
+                          strcmp(cat.entries[uncapped].group, "Frame Rate") ==
+                              0 &&
+                          strcmp(cat.entries[thirty].group, "Frame Rate") == 0,
+                      "one group");
+                CHECK(cat.entries[rate].frame_rate &&
+                          cat.entries[uncapped].frame_rate &&
+                          !cat.entries[thirty].frame_rate,
+                      "the rated and uncapped ones set the frame rate");
+                CHECK(strstr(cat.entries[rate].rates, "144") != NULL &&
+                          strstr(cat.entries[rate].rates, "display") != NULL,
+                      "144 and the display's rate");
+                CHECK(strcmp(cat.entries[rate].versions, "01.09") == 0,
+                      "for 1.09");
+              }
             }
         }
         if (entry >= 0) {
@@ -197,7 +223,8 @@ static void parallel_patches(int argc, char** argv) {
             size_t n, first = 0;
             unsigned m;
             CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
-            CHECK(cat.metadata_count == (f == 0 ? 5u : 2u), "a metadata for each patch");
+            CHECK(cat.metadata_count == (f == 0 ? 8u : 2u),
+                  "a metadata for each patch");
             for (m = 0; m < cat.metadata_count; m++) {
                 const char* name = rxml_node_attrib(cat.metadata[m].node, "Name");
                 if (name && strcmp(name, "Lower Audio Latency") == 0) {
@@ -287,12 +314,57 @@ static void parallel_patches(int argc, char** argv) {
     }
 }
 
+/* A group: two patches, one with rates */
+static const char grouped[] =
+    "<Patch><TitleID><ID>CUSA00207</ID></TitleID>"
+    "<Metadata Name=\"Rate\" Group=\"Frame Rate\" Choice=\"%u FPS\" "
+    "Rates=\"60, 144,display,0,1001,x,90 \"><PatchList/></Metadata>"
+    "<Metadata Name=\"Uncapped\" Group=\"Frame Rate\"><PatchList/></Metadata>"
+    "</Patch>";
+
+static void collect_rate(void *ctx, unsigned rate) {
+  unsigned *list = (unsigned *)ctx;
+  if (list[0] < 15)
+    list[++list[0]] = rate;
+}
+
+static void groups(void) {
+  patch_catalog_source_t src;
+  unsigned rates[16];
+  int rate, uncapped;
+  src.repository = "ParaLLEl";
+  src.data = (const unsigned char *)grouped;
+  src.size = sizeof(grouped) - 1;
+  CHECK(patch_catalog_build(&cat, &src, 1, "CUSA00207"),
+        "built the grouped file");
+  rate = find(&cat, "Rate");
+  uncapped = find(&cat, "Uncapped");
+  CHECK(rate >= 0 && uncapped >= 0, "both patches of the group");
+  if (rate >= 0 && uncapped >= 0) {
+    CHECK(strcmp(cat.entries[rate].group, "Frame Rate") == 0 &&
+              strcmp(cat.entries[uncapped].group, "Frame Rate") == 0,
+          "their group");
+    CHECK(strcmp(cat.entries[rate].choice, "%u FPS") == 0 &&
+              cat.entries[uncapped].choice == NULL &&
+              cat.entries[uncapped].rates == NULL,
+          "a choice label and rates, or none");
+    rates[0] = 0;
+    patch_catalog_each_rate(cat.entries[rate].rates, collect_rate, rates);
+    CHECK(rates[0] == 4 && rates[1] == 60 && rates[2] == 144 && rates[3] == 0 &&
+              rates[4] == 90,
+          "the rates in order, display as 0, those out of range or not numbers "
+          "left out");
+  }
+  patch_catalog_free(&cat);
+}
+
 int main(int argc, char** argv) {
     patch_catalog_source_t sources[4];
     char key[32];
     int fps, intro, blur;
     unsigned i, superseded = 0, fps_metadata = 0;
 
+    groups();
     sources[0] = source("shadPS4", first);
     sources[1] = source("shadPS4", other);
     sources[2] = source("GoldHEN", broken);

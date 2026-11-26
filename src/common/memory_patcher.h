@@ -48,8 +48,9 @@ void OnGameLoaded();
 /// for the Patch Manager core options. False when memory ran out.
 bool BuildCatalog(patch_catalog_t& cat, const char* serial);
 /// The Patch Manager's choice: the entries switched on in the catalog for @serial, as a bit
-/// set of PATCH_CATALOG_WORDS words. Applied with the other patches once the game is loaded.
-void SetCatalogPatches(const char* serial, const uint32_t* on);
+/// set of PATCH_CATALOG_WORDS words, and the rate picked for each (PATCH_CATALOG_MAX, 0 for
+/// none; common/patch_rate.h). Applied with the other patches once the game is loaded.
+void SetCatalogPatches(const char* serial, const uint32_t* on, const uint16_t* rates);
 
 void PatchMemory(const patchInfo& patch);
 

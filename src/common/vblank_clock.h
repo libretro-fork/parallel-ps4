@@ -9,10 +9,11 @@ extern "C" {
 #endif
 
 /* The console's vblanks, counted from the frontend's frames instead of a clock: each
- * retro_run is one tick of VBLANK_CLOCK_TICK_HZ, and a console running at @hz has
- * hz / VBLANK_CLOCK_TICK_HZ vblanks a tick (two at 120 Hz, one every other tick at 30,
- * three every two at 90). Nothing sleeps and nothing reads the time: the frontend's
- * pacing (the display, its audio) is the console's. */
+ * retro_run is one tick of the frontend's frame rate (VBLANK_CLOCK_TICK_HZ unless a game's
+ * frame rate patch sets another), and a console running at @hz has hz / tick_hz vblanks a
+ * tick (two at 120 Hz, one every other tick at 30, three every two at 90, at 60 ticks).
+ * Nothing sleeps and nothing reads the time: the frontend's pacing (the display, its audio)
+ * is the console's. */
 #define VBLANK_CLOCK_TICK_HZ 60u
 
 /* The most vblanks owed at once, past one tick's: a present thread held up for longer (a
@@ -22,11 +23,13 @@ extern "C" {
 typedef struct vblank_clock {
     unsigned base_ticks; /* the ticks when the count (or the rate) began */
     unsigned hz;         /* the rate counted at since */
+    unsigned tick_hz;    /* the frontend's frames a second */
     long done;           /* the vblanks given since base_ticks (less any carried over) */
 } vblank_clock_t;
 
-/* Starts counting at @ticks, @hz a second */
-void vblank_clock_init(vblank_clock_t* clock, unsigned ticks, unsigned hz);
+/* Starts counting at @ticks, @hz a second, the frontend running @tick_hz frames a second
+ * (0: VBLANK_CLOCK_TICK_HZ) */
+void vblank_clock_init(vblank_clock_t* clock, unsigned ticks, unsigned hz, unsigned tick_hz);
 
 /* How many vblanks are owed now that the frontend's tick count reads @ticks, the console
  * at @hz (it can change: the count goes on from where it is). The ticks may wrap. Taking

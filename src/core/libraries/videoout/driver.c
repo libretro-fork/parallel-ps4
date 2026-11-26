@@ -549,7 +549,8 @@ static void videoout_present_thread(void* arg) {
     (void)arg;
     thread_name_set("shadPS4:PresentThread");
     ticks = libretro_vblank_ticks();
-    vblank_clock_init(&clock, ticks, emu_settings_get_vblank_frequency());
+    vblank_clock_init(&clock, ticks, emu_settings_get_vblank_frequency(),
+                      emu_settings_get_frontend_frame_rate());
 
     for (;;) {
         unsigned owed = vblank_clock_owed(&clock, ticks, emu_settings_get_vblank_frequency());

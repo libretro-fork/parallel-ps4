@@ -173,6 +173,11 @@ static void FrameThread(void*) {
     thread_name_set("shadPS4:Frames");
     std::uint32_t ticks =
         static_cast<std::uint32_t>(retro_atomic_load_acquire_int(&shared->vblank_ticks));
+    // The frontend's frames a second (SharedOptions::frame_rate), fixed for the
+    // game's run
+    const unsigned frame_rate =
+        shared->options.frame_rate ? shared->options.frame_rate : 60u;
+    unsigned sound_carry = 0;
     for (;;) {
         const int key = wakes.vblank.Prepare();
         if (retro_atomic_load_acquire_int(&shared->quit) != 0) {
@@ -187,8 +192,13 @@ static void FrameThread(void*) {
         }
         wakes.vblank.Cancel();
         for (; ticks != now; ++ticks) {
-            audio_mix_feed_clip(AUDIO_MIX_FRAME_FRAMES);
-            game_clock_frame(Libraries::Kernel::GameClock());
+          // A frame's worth of the clip: 48000 / the frame rate, its fraction
+          // carried
+          sound_carry += 48000u;
+          const unsigned sound = sound_carry / frame_rate;
+          sound_carry -= sound * frame_rate;
+          audio_mix_feed_clip(sound);
+          game_clock_frame(Libraries::Kernel::GameClock());
         }
         audio_mix_notify_room();
     }
@@ -609,6 +619,8 @@ void ApplyCoreOptions() {
     emu_settings_set_window_height(options.height, false);
     (void)retro_atomic_exchange_int(&VideoCore::render_width, options.render_width);
     emu_settings_set_vblank_frequency(options.vblank_frequency, false);
+    emu_settings_set_frontend_frame_rate(
+        options.frame_rate ? options.frame_rate : 60, false);
     emu_settings_set_readbacks_mode(options.readbacks, false);
     emu_settings_set_readback_import(options.readback_import, false);
     emu_settings_set_direct_memory_access_enabled(
@@ -641,7 +653,8 @@ void ApplyCoreOptions() {
     char serial[sizeof(options.patch_serial)];
     std::memcpy(serial, options.patch_serial, sizeof(serial));
     serial[sizeof(serial) - 1] = '\0';
-    MemoryPatcher::SetCatalogPatches(serial, options.patches_on);
+    MemoryPatcher::SetCatalogPatches(serial, options.patches_on,
+                                     options.patch_rates);
 }
 
 void SetRumble(std::uint32_t pad, std::uint8_t small_motor, std::uint8_t large_motor) {

@@ -170,6 +170,7 @@ enum emu_settings_section {
     EMU_SETTING(sample_positions, "sample_positions", GPU, BOOL, false, OVR, GEN)                  \
     EMU_SETTING(patch_shaders, "patch_shaders", GPU, BOOL, false, OVR, GEN)                        \
     EMU_SETTING(vblank_frequency, "vblank_frequency", GPU, UINT, 60, OVR, CUSTOM)                  \
+    EMU_SETTING(frontend_frame_rate, "frontend_frame_rate", GPU, UINT, 60, 0, GEN)                 \
     EMU_SETTING(full_screen, "full_screen", GPU, BOOL, false, OVR, GEN)                            \
     EMU_SETTING(full_screen_mode, "full_screen_mode", GPU, STRING, "Windowed", OVR, GEN)           \
     EMU_SETTING(present_mode, "present_mode", GPU, STRING, "Mailbox", OVR, GEN)                    \

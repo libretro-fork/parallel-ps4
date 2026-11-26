@@ -15,6 +15,12 @@
  * the same name; it is one entry too, and for a version both have, the
  * first repository's is the one applied.
  *
+ * Patches of the same Group (an attribute of the core's own files) are one
+ * choice among several: the core lists them as one option, a patch being one
+ * of its values, or one value per rate when it has Rates (a list such as
+ * "60,90,120,display"; common/patch_rate.h), its Choice the value's label with
+ * %u for the rate. At most one patch of a group is on.
+ *
  * The core and the emulator each build the catalog from the same files for
  * the same serial and get the same entries in the same order, so an entry
  * is named between them by its index. */
@@ -45,6 +51,14 @@ typedef struct patch_catalog_entry {
     const char* note;
     /* The repository of its first file */
     const char* repository;
+    /* Its group, its label in the group's option and its rates (NULL when
+     * none), from its first <Metadata> */
+    const char* group;
+    const char* choice;
+    const char* rates;
+    /* FrameRate="1": the rate picked is the game's frame rate, and the
+     * frontend's: the core runs at it */
+    int frame_rate;
     /* The versions of the game it is for, ", " between them; cut short when long */
     char versions[96];
     /* Its core option's key: the same for the same patch of the same game */
@@ -76,6 +90,11 @@ void patch_catalog_free(patch_catalog_t* cat);
 
 /* The key's hash for @serial and @name, as in patch_catalog_entry_t.key */
 void patch_catalog_key(char* s, size_t len, const char* serial, const char* name);
+
+/* The rates in an entry's Rates list, in its order: @fn(@ctx, rate) for each,
+ * a rate being a number from 1 to 1000 or 0 for "display" (the display's own
+ * refresh rate, worked out when the game starts). Others are left out. */
+void patch_catalog_each_rate(const char* rates, void (*fn)(void* ctx, unsigned rate), void* ctx);
 
 RETRO_END_DECLS
 

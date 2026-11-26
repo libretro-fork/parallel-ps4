@@ -717,7 +717,9 @@ void RegisterTime(Core::Loader::SymbolsResolver* sym) {
     boot_epoch_ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                          std::chrono::system_clock::now().time_since_epoch())
                                          .count());
-    game_clock_init(&game_clock, 60, 1);
+    // A frame of the game's time each of the frontend's frames: 60 a second, or the rate a
+    // frame rate patch sets
+    game_clock_init(&game_clock, emu_settings_get_frontend_frame_rate(), 1);
     retro_eventcount_init(&host_sleep_ec);
 
     // POSIX

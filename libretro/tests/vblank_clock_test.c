@@ -28,7 +28,7 @@ static unsigned long run(unsigned start, unsigned frames, unsigned hz) {
     vblank_clock_t c;
     unsigned long given = 0;
     unsigned i;
-    vblank_clock_init(&c, start, hz);
+    vblank_clock_init(&c, start, hz, 0);
     for (i = 1; i <= frames; i++) {
         unsigned owed = vblank_clock_owed(&c, start + i, hz);
         while (owed--) {
@@ -46,7 +46,7 @@ int main(void) {
     unsigned i, owed;
     unsigned long given;
 
-    vblank_clock_init(&c, 100, 60);
+    vblank_clock_init(&c, 100, 60, 0);
     CHECK(vblank_clock_owed(&c, 100, 60) == 0, "none before a tick");
     CHECK(vblank_clock_owed(&c, 101, 60) == 1, "one a tick at 60");
     vblank_clock_take(&c);
@@ -60,14 +60,14 @@ int main(void) {
     CHECK(run(0, 60, 240) == 240, "240 Hz: 240 a second");
     CHECK(run(0, 3600, 144) == 144 * 60, "144 Hz: a minute, no drift");
 
-    vblank_clock_init(&c, 0, 30);
+    vblank_clock_init(&c, 0, 30, 0);
     CHECK(vblank_clock_owed(&c, 1, 30) == 0, "30 Hz: not after one tick");
     CHECK(vblank_clock_owed(&c, 2, 30) == 1, "30 Hz: after two");
-    vblank_clock_init(&c, 0, 120);
+    vblank_clock_init(&c, 0, 120, 0);
     CHECK(vblank_clock_owed(&c, 1, 120) == 2, "120 Hz: two a tick");
 
     /* Held up for a second: no more than the most owed */
-    vblank_clock_init(&c, 0, 60);
+    vblank_clock_init(&c, 0, 60, 0);
     owed = vblank_clock_owed(&c, 60, 60);
     CHECK(owed == 1 + VBLANK_CLOCK_MAX_OWED, "a stall owes at most a tick's and the most more");
     while (owed--)
@@ -76,7 +76,7 @@ int main(void) {
     CHECK(vblank_clock_owed(&c, 61, 60) == 1, "and one a tick again");
 
     /* The rate changed with one owed: kept, then the new rate */
-    vblank_clock_init(&c, 0, 60);
+    vblank_clock_init(&c, 0, 60, 0);
     CHECK(vblank_clock_owed(&c, 1, 60) == 1, "one owed");
     CHECK(vblank_clock_owed(&c, 1, 120) == 1, "still owed at the new rate");
     vblank_clock_take(&c);
@@ -88,7 +88,7 @@ int main(void) {
     CHECK(run(0xFFFFFFF0u, 60, 90) == 90, "across the wrap at 90");
 
     /* Past the restart point: nothing lost, nothing doubled */
-    vblank_clock_init(&c, 0, 90);
+    vblank_clock_init(&c, 0, 90, 0);
     given = 0;
     for (i = 0x0FFFFFF0u; i <= 0x0FFFFFF0u + 60; i++) {
         if (i == 0x0FFFFFF0u) {
@@ -105,6 +105,32 @@ int main(void) {
         }
     }
     CHECK(given == 90 - 1 || given == 90 || given == 90 + 1, "90 a second past the restart");
+
+    /* A frontend at another frame rate (a frame rate patch): 144 ticks a second
+     * at 144 Hz is one vblank a tick; at 60 Hz, 60 over 144 ticks, never two in
+     * one */
+    vblank_clock_init(&c, 0, 144, 144);
+    given = 0;
+    for (i = 1; i <= 144; i++) {
+      owed = vblank_clock_owed(&c, i, 144);
+      CHECK(owed == 1, "one vblank each of 144 ticks at 144 Hz");
+      while (owed--) {
+        vblank_clock_take(&c);
+        given++;
+      }
+    }
+    CHECK(given == 144, "144 a second at 144 ticks");
+    vblank_clock_init(&c, 0, 60, 144);
+    given = 0;
+    for (i = 1; i <= 144; i++) {
+      owed = vblank_clock_owed(&c, i, 60);
+      CHECK(owed <= 1, "at most one a tick at 60 Hz of 144 ticks");
+      while (owed--) {
+        vblank_clock_take(&c);
+        given++;
+      }
+    }
+    CHECK(given == 60, "60 a second at 144 ticks");
 
     if (failures) {
         printf("vblank_clock: %d failed\n", failures);

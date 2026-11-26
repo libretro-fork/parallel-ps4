@@ -354,6 +354,11 @@ build $CC -std=c89 -pedantic -O1 -g -Wall -Wdeclaration-after-statement -fsaniti
     -Isrc -I$L/include libretro/tests/patch_halve_test.c src/common/patch_halve.c \
     -o "$OUT/patch_halve_test"
 "$OUT/patch_halve_test"
+# A patch line's value as a formula of the rate picked (common/patch_rate.h)
+build $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc -I$L/include libretro/tests/patch_rate_test.c src/common/patch_rate.c -lm \
+    -o "$OUT/patch_rate_test"
+"$OUT/patch_rate_test"
 # Asynchronous shader compilation: a draw is left out only of an image the game drew into the
 # frame before
 build $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \

@@ -107,8 +107,11 @@ retro_log_printf_t log_cb = nullptr;
 constexpr unsigned kWidth = 1920;
 constexpr unsigned kHeight = 1080;
 constexpr double kFps = 60.0;
+// The frontend's frames a second for the game running: kFps, or the rate a
+// frame rate patch switched on sets (SharedOptions::frame_rate), from the
+// game's start
+unsigned frame_rate = 60;
 constexpr int kSampleRate = 48000;
-constexpr int kAudioFrames = kSampleRate / 60;
 
 SharedState* shared = nullptr;
 // This process's handles on the wakes in the shared memory
@@ -183,7 +186,7 @@ void AnnounceSize(unsigned width, unsigned height) {
         av_info.geometry.max_width = declared_max_width;
         av_info.geometry.max_height = declared_max_height;
         av_info.geometry.aspect_ratio = static_cast<float>(width) / static_cast<float>(height);
-        av_info.timing.fps = kFps;
+        av_info.timing.fps = static_cast<double>(frame_rate);
         av_info.timing.sample_rate = kSampleRate;
         environ_cb(RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO, &av_info);
         return;
@@ -313,7 +316,105 @@ std::string PatchInfo(const patch_catalog_entry_t& entry) {
     return info;
 }
 
-// The options of libretro_core_options.h, then the game's patches
+// A group of patches (common/patch_catalog.h): one option, a value for each
+// patch in it, or for each of its rates
+struct PatchChoice {
+  unsigned entry;
+  // The rate, 0 for the display's own; kNoRate for a patch without rates
+  unsigned rate;
+  std::string value;
+  std::string label;
+};
+constexpr unsigned kNoRate = ~0u;
+struct PatchGroup {
+  std::string name;
+  char key[32];
+  std::string info;
+  std::vector<PatchChoice> choices;
+};
+std::vector<PatchGroup> patch_groups;
+
+// A choice's label: the patch's Choice, %u its rate ("Match display" for the
+// display's), or its name
+std::string ChoiceLabel(const patch_catalog_entry_t &entry, unsigned rate) {
+  const std::string choice =
+      entry.choice && *entry.choice ? entry.choice : entry.name;
+  const size_t at = choice.find("%u");
+  if (rate == kNoRate || at == std::string::npos) {
+    return choice;
+  }
+  if (rate == 0) {
+    return "Match display";
+  }
+  return choice.substr(0, at) + std::to_string(rate) + choice.substr(at + 2);
+}
+
+// The groups of the catalog, in the order of their first patch, the core's own
+// patches (ParaLLEl) first
+void BuildPatchGroups() {
+  patch_groups.clear();
+  for (unsigned pass = 0; pass < 2; pass++)
+    for (unsigned i = 0; i < patch_catalog.count; i++) {
+      const patch_catalog_entry_t &entry = patch_catalog.entries[i];
+      if (!entry.group || !*entry.group ||
+          (std::strcmp(entry.repository, "ParaLLEl") == 0) != (pass == 0)) {
+        continue;
+      }
+      PatchGroup *group = nullptr;
+      for (PatchGroup &g : patch_groups) {
+        if (g.name == entry.group) {
+          group = &g;
+        }
+      }
+      if (!group) {
+        group = &patch_groups.emplace_back();
+        group->name = entry.group;
+        const std::string id = std::string("group:") + entry.group;
+        patch_catalog_key(group->key, sizeof(group->key), patch_serial.c_str(),
+                          id.c_str());
+        group->info = "Choose one. ";
+      }
+      const auto add = [&](unsigned rate) {
+        // Room for "disabled" and the terminator in the frontend's list
+        if (group->choices.size() + 2 >= RETRO_NUM_CORE_OPTION_VALUES_MAX) {
+          return;
+        }
+        PatchChoice &c = group->choices.emplace_back();
+        c.entry = i;
+        c.rate = rate;
+        c.value = entry.name;
+        if (rate != kNoRate) {
+          c.value += '@';
+          c.value += rate == 0 ? std::string("display") : std::to_string(rate);
+        }
+        c.label = ChoiceLabel(entry, rate);
+      };
+      if (entry.rates && *entry.rates) {
+        std::vector<unsigned> rates;
+        patch_catalog_each_rate(
+            entry.rates,
+            [](void *ctx, unsigned rate) {
+              static_cast<std::vector<unsigned> *>(ctx)->push_back(rate);
+            },
+            &rates);
+        for (const unsigned rate : rates) {
+          add(rate);
+        }
+      } else {
+        add(kNoRate);
+      }
+      group->info += PatchInfo(entry);
+      group->info += ' ';
+    }
+  for (PatchGroup &g : patch_groups) {
+    while (!g.info.empty() && g.info.back() == ' ') {
+      g.info.pop_back();
+    }
+  }
+}
+
+// The options of libretro_core_options.h, then the game's patches: one switch
+// each, and one option for each group of them
 void PublishCoreOptions() {
     option_definitions.clear();
     option_categories.clear();
@@ -324,10 +425,28 @@ void PublishCoreOptions() {
     for (const auto* cat = option_cats_us; cat->key; cat++) {
         option_categories.push_back(*cat);
     }
+    BuildPatchGroups();
     if (patch_catalog.count) {
         patch_infos.reserve(patch_catalog.count);
+        for (const PatchGroup &group : patch_groups) {
+          retro_core_option_v2_definition &def =
+              option_definitions.emplace_back();
+          def.key = group.key;
+          def.desc = group.name.c_str();
+          def.info = group.info.c_str();
+          def.category_key = "patches";
+          def.values[0] = {"disabled", "Game default"};
+          for (size_t c = 0; c < group.choices.size(); c++) {
+            def.values[c + 1] = {group.choices[c].value.c_str(),
+                                 group.choices[c].label.c_str()};
+          }
+          def.default_value = "disabled";
+        }
         for (unsigned i = 0; i < patch_catalog.count; i++) {
             const patch_catalog_entry_t& entry = patch_catalog.entries[i];
+            if (entry.group && *entry.group) {
+              continue;
+            }
             patch_infos.push_back(PatchInfo(entry));
             retro_core_option_v2_definition& def = option_definitions.emplace_back();
             def.key = entry.key;
@@ -338,10 +457,12 @@ void PublishCoreOptions() {
             def.values[1] = {"enabled", nullptr};
             def.default_value = "disabled";
         }
-        option_categories.push_back(
-            {"patches", "Patch Manager",
-             "The game's patches, from the shadPS4 and GoldHEN patch repositories the core "
-             "carries. A change applies at the next start of the game (Restart)."});
+        option_categories.push_back({"patches", "Patch Manager",
+                                     "The game's patches, from the shadPS4 and "
+                                     "GoldHEN patch repositories the core "
+                                     "carries and the core's own. A change "
+                                     "applies at the next start of the game "
+                                     "(Restart)."});
     }
     option_definitions.emplace_back();
     option_categories.emplace_back();
@@ -370,15 +491,52 @@ void SetUpPatchManager(const std::string& serial) {
     PublishCoreOptions();
 }
 
-// The patches switched on, as SharedOptions has them
+// The display's refresh rate, as the frontend gives it, in whole frames a
+// second (1 to 1000); 60 when it does not say
+unsigned DisplayRate() {
+  float hz = 0.0f;
+  if (!environ_cb ||
+      !environ_cb(RETRO_ENVIRONMENT_GET_TARGET_REFRESH_RATE, &hz) ||
+      !(hz >= 1.0f && hz <= 1000.0f)) {
+    return 60;
+  }
+  return static_cast<unsigned>(hz + 0.5f);
+}
+
+// The patches switched on, as SharedOptions has them, and the frame rate one of
+// them sets
 void ReadPatchOptions(Libretro::SharedOptions& options) {
-    std::memset(options.patch_serial, 0, sizeof(options.patch_serial));
-    std::memset(options.patches_on, 0, sizeof(options.patches_on));
-    std::memcpy(options.patch_serial, patch_serial.data(), patch_serial.size());
-    for (unsigned i = 0; i < patch_catalog.count; i++) {
-        if (OptionValue(patch_catalog.entries[i].key, "disabled") == "enabled") {
-            options.patches_on[i / 32] |= 1u << (i % 32);
+  options.frame_rate = 60;
+  std::memset(options.patch_serial, 0, sizeof(options.patch_serial));
+  std::memset(options.patches_on, 0, sizeof(options.patches_on));
+  std::memcpy(options.patch_serial, patch_serial.data(), patch_serial.size());
+  std::memset(options.patch_rates, 0, sizeof(options.patch_rates));
+  for (unsigned i = 0; i < patch_catalog.count; i++) {
+    const patch_catalog_entry_t &entry = patch_catalog.entries[i];
+    if ((!entry.group || !*entry.group) &&
+        OptionValue(entry.key, "disabled") == "enabled") {
+      options.patches_on[i / 32] |= 1u << (i % 32);
+    }
+    }
+    // A group: the patch of the choice, at its rate
+    for (const PatchGroup &group : patch_groups) {
+      const std::string value = OptionValue(group.key, "disabled");
+      for (const PatchChoice &c : group.choices) {
+        if (c.value != value) {
+          continue;
         }
+        options.patches_on[c.entry / 32] |= 1u << (c.entry % 32);
+        if (c.rate != kNoRate) {
+          const unsigned rate = c.rate == 0 ? DisplayRate() : c.rate;
+          options.patch_rates[c.entry] = static_cast<std::uint16_t>(rate);
+          // The frontend at the game's rate, from 47 frames a second (the most
+          // sound the mix takes a frame) to 1000
+          if (patch_catalog.entries[c.entry].frame_rate) {
+            options.frame_rate = std::clamp(rate, 47u, 1000u);
+          }
+        }
+        break;
+      }
     }
 }
 
@@ -464,6 +622,11 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
     options.log_separate = enabled("shadps4_log_separate", "disabled");
     options.log_sync = enabled("shadps4_log_sync", "enabled");
     ReadPatchOptions(options);
+    // A frame rate patch's rate is the console's vblanks too: one each frame,
+    // whatever the VBlank Frequency option says
+    if (options.frame_rate != 60) {
+      options.vblank_frequency = options.frame_rate;
+    }
 }
 
 void Notify(const char* text) {
@@ -1335,22 +1498,32 @@ void TakeFrame() {
     }
 }
 
-// One frame of sound to the frontend, exactly kAudioFrames, mixed here from the emulator's
-// sources' inputs in the shared memory (libretro/audio_mix.h): what each has of it, summed,
-// silence for what one has not yet written. No ring between, nothing held back: the frame the
-// game made its sound for is the frame that plays it. Mixed into a buffer of this frame's, at
-// the frontend's scale and width, and handed over from there.
+// One frame of sound to the frontend, a frame's worth at the frame rate, mixed
+// here from the emulator's sources' inputs in the shared memory
+// (libretro/audio_mix.h): what each has of it, summed, silence for what one has
+// not yet written. No ring between, nothing held back: the frame the game made
+// its sound for is the frame that plays it. Mixed into a buffer of this
+// frame's, at the frontend's scale and width, and handed over from there.
 void SendAudio() {
-    static float out_f32[kAudioFrames * 8];
-    static int16_t out_s16[kAudioFrames * 8];
-    unsigned channels = 2;
-    // Exactly a frame of sound, every run: the game's time steps through the frame as its
-    // threads react, so its sound is in well before this run (common/game_clock.h)
-    constexpr unsigned frames = kAudioFrames;
-    // Before the first frame the game's time has not started: no sound of it yet
-    const bool mixed = shared && retro_atomic_load_relaxed_int(&shared->vblank_ticks) != 0;
-    if (mixed) {
-        audio_mix_mix(frames, &channels);
+  // The most a frame has: at 47 frames a second, the slowest the mix takes (its
+  // 1024)
+  static float out_f32[1024 * 8];
+  static int16_t out_s16[1024 * 8];
+  static unsigned sound_carry = 0;
+  unsigned channels = 2;
+  // Exactly a frame of sound, every run: the game's time steps through the
+  // frame as its threads react, so its sound is in well before this run
+  // (common/game_clock.h). At 60 frames a second 800; at another frame rate
+  // 48000 over it, its fraction carried to the next, as the emulator's frame
+  // thread feeds it (libretro/host.cpp)
+  sound_carry += kSampleRate;
+  const unsigned frames = sound_carry / frame_rate;
+  sound_carry -= frames * frame_rate;
+  // Before the first frame the game's time has not started: no sound of it yet
+  const bool mixed =
+      shared && retro_atomic_load_relaxed_int(&shared->vblank_ticks) != 0;
+  if (mixed) {
+    audio_mix_mix(frames, &channels);
     } else {
         std::memset(out_f32, 0, sizeof(out_f32));
         std::memset(out_s16, 0, sizeof(out_s16));
@@ -1496,7 +1669,7 @@ RETRO_API void retro_get_system_av_info(struct retro_system_av_info* info) {
     announced_width = output_width;
     announced_height = output_height;
     info->geometry.aspect_ratio = 16.0f / 9.0f;
-    info->timing.fps = kFps;
+    info->timing.fps = static_cast<double>(frame_rate);
     info->timing.sample_rate = kSampleRate;
 }
 
@@ -1541,6 +1714,8 @@ static bool StartGame(const std::string& boot_path, const std::string& user_dir,
     std::strcpy(shared->update_path, update_path.c_str());
     std::strcpy(shared->addcont_paths, addcont_paths.c_str());
     ReadCoreOptions(shared->options);
+    // The frontend's frame rate for this game, until it starts again
+    frame_rate = shared->options.frame_rate ? shared->options.frame_rate : 60;
     // The mix's inputs: made here, empty, at the width the frontend takes, before the
     // emulator attaches to them
     audio_mix_attach(&shared->mix, shared->options.audio_channels == 8 ? 8 : 2, 1);

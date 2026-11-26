@@ -24,7 +24,7 @@
 namespace Libretro {
 
 inline constexpr std::uint32_t SHARED_MAGIC = 0x34505368; // "hSP4"
-inline constexpr std::uint32_t SHARED_VERSION = 31;
+inline constexpr std::uint32_t SHARED_VERSION = 32;
 
 // MAX_WIDTH, MAX_HEIGHT and FRAME_BYTES, a frame's size at most, are in
 // libretro_bridge.h
@@ -157,6 +157,14 @@ struct SharedOptions {
     /// emulator builds again for the same serial.
     char patch_serial[16];
     std::uint32_t patches_on[PATCH_CATALOG_WORDS];
+    /// The rate picked for each patch switched on that has rates
+    /// (common/patch_rate.h), the display's own already worked out; 0 for the
+    /// others.
+    std::uint16_t patch_rates[PATCH_CATALOG_MAX];
+    /// The frontend's frames a second, the game's time and the console's
+    /// vblanks counted from them: 60, or the rate a frame rate patch switched
+    /// on sets (FrameRate="1").
+    std::uint32_t frame_rate;
 };
 
 struct SharedState {

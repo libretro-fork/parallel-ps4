@@ -17,6 +17,7 @@
 #include "common/logging/log.h"
 #include "common/patch_halve.h"
 #include "common/patch_index.h"
+#include "common/patch_rate.h"
 #include "common/path_util.h"
 #include "common/small_vector.h"
 #include "common/xml.h"
@@ -32,6 +33,7 @@ char g_game_serial[32];
 // The Patch Manager's choice (SetCatalogPatches)
 static char catalog_serial[16];
 static uint32_t catalog_on[PATCH_CATALOG_WORDS];
+static uint16_t catalog_rates[PATCH_CATALOG_MAX];
 
 namespace {
 
@@ -177,8 +179,9 @@ long ParseHexBytes(const char* hex, u8* out, size_t size) {
 } // Anonymous namespace
 
 // One patch (a <Metadata>) of a patch file, for the executable and the version of the game
-// it names; a mask is looked for whatever the version.
-static void ApplyMetadata(const Common::Xml::Node& node, const char* app_version) {
+// it names; a mask is looked for whatever the version. @rate: the rate picked for it, 0 when
+// none (common/patch_rate.h).
+static void ApplyMetadata(const Common::Xml::Node& node, const char* app_version, unsigned rate) {
     const char* const current_patch_name = node.attribute("Name").value();
     const bool version_matches = strcmp(node.attribute("AppVer").value(), app_version) == 0;
 
@@ -193,6 +196,41 @@ static void ApplyMetadata(const Common::Xml::Node& node, const char* app_version
         const bool is_jump = strcmp(type, "mask_jump32") == 0;
         const bool is_halve = strcmp(type, "mask_halve") == 0;
         if (!version_matches && !is_mask && !is_jump && !is_halve) {
+            continue;
+        }
+        // A line for some rates only (MinRate, MaxRate): for those, and never without a rate
+        const char* const min_rate = patch_line.attribute("MinRate").value();
+        const char* const max_rate = patch_line.attribute("MaxRate").value();
+        if ((min_rate[0] || max_rate[0]) &&
+            (rate == 0 || !patch_rate_in_range(min_rate, max_rate, rate))) {
+            continue;
+        }
+        if (patch_rate_is_line(type)) {
+            // The core's own kind of line: the value of a formula of the rate, written where
+            // the line says (common/patch_rate.h)
+            const char* const address = patch_line.attribute("Address").value();
+            const char* const formula = patch_line.attribute("Value").value();
+            const unsigned size =
+                static_cast<unsigned>(strtoul(patch_line.attribute("Size").value(), nullptr, 10));
+            double value = 0.0;
+            char hex[64];
+            if (rate == 0) {
+                LOG_ERROR(Loader, "Patch %s: no rate picked for its line at %s, not applied",
+                          current_patch_name, address);
+            } else if (!patch_rate_eval(formula, static_cast<double>(rate), &value) ||
+                       !patch_rate_hex(type, size, value, hex, sizeof(hex))) {
+                LOG_ERROR(Loader, "Patch %s: its formula %s at %s gives no %s at %u, not applied",
+                          current_patch_name, formula, address, type, rate);
+            } else {
+                patchInfo patch{};
+                patch.modNameStr = current_patch_name;
+                patch.offsetStr = address;
+                patch.valueStr = hex;
+                patch.targetStr = "";
+                patch.sizeStr = "";
+                patch.patchMask = PatchMask::None;
+                PatchMemory(patch);
+            }
             continue;
         }
 
@@ -285,7 +323,7 @@ static void ApplyPatchesFromXML(const char* path) {
     for (const Common::Xml::Node node : doc.child("Patch").children()) {
         if (strcmp(node.name(), "Metadata") == 0 &&
             strcmp(node.attribute("isEnabled").value(), "true") == 0) {
-            ApplyMetadata(node, app_version);
+            ApplyMetadata(node, app_version, 0);
         }
     }
 }
@@ -322,9 +360,10 @@ bool BuildCatalog(patch_catalog_t& cat, const char* serial) {
     return patch_catalog_build(&cat, sources.data(), sources.size(), serial) != 0;
 }
 
-void SetCatalogPatches(const char* serial, const uint32_t* on) {
+void SetCatalogPatches(const char* serial, const uint32_t* on, const uint16_t* rates) {
     snprintf(catalog_serial, sizeof(catalog_serial), "%s", serial);
     memcpy(catalog_on, on, sizeof(catalog_on));
+    memcpy(catalog_rates, rates, sizeof(catalog_rates));
 }
 
 // The patches switched on in the Patch Manager, from the repositories the core carries
@@ -350,7 +389,7 @@ static void ApplyCatalogPatches() {
         }
         LOG_INFO(Loader, "Patch Manager: %s (%s)", cat.entries[entry].name,
                  cat.entries[entry].repository);
-        ApplyMetadata(Common::Xml::Node(cat.metadata[i].node), app_version);
+        ApplyMetadata(Common::Xml::Node(cat.metadata[i].node), app_version, catalog_rates[entry]);
     }
     patch_catalog_free(&cat);
 }
