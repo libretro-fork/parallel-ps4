@@ -474,11 +474,14 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& image_
                                                          BindingType binding,
                                                          ImageId cache_image_id,
                                                          ImageId merged_image_id) {
-    static constexpr u64 NUM_FRAMES_BEFORE_REMOVAL = 32;
+    static constexpr u32 NUM_FRAMES_BEFORE_REMOVAL = 32;
 
+    // Frames, counted at the flips: the scheduler's ticks are its submissions, of which a frame
+    // has as many as it has readbacks and early submits, so 32 of them could be a frame or two
+    // and an image the game uses every other frame was freed with what the GPU drew into it
     Image& cache_image = slot_images[cache_image_id];
     const bool safe_to_delete =
-        scheduler.CurrentTick() - cache_image.tick_accessed_last > NUM_FRAMES_BEFORE_REMOVAL;
+        draw_frame - cache_image.frame_accessed_last > NUM_FRAMES_BEFORE_REMOVAL;
 
     // Equal address
     if (image_info.guest_address == cache_image.info.guest_address) {
@@ -1433,6 +1436,7 @@ void TextureCache::RunGarbageCollector() {
 
 void TextureCache::TouchImage(Image& image) {
     image_lru_cache.Touch(image, gc_tick);
+    image.frame_accessed_last = draw_frame;
 
     // Image is still valid
     image.gpu_hash = 0;

@@ -263,6 +263,8 @@ public:
     u64 image_uid{};
     u64 lru_id{};
     u64 tick_accessed_last{};
+    /// The frame (TextureCache::draw_frame) it was last used in
+    u32 frame_accessed_last{};
     /// The game's frames it was last drawn into (asynchronous shader compilation)
     target_frames_t drawn_frames{};
     u64 cpu_hash{};
