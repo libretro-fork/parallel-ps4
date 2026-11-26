@@ -1193,8 +1193,16 @@ void Translator::EmitFetch(const GcnInst& inst) {
         file.WriteRaw<u8>(code, fetch_data.size);
     }
 
+    // The registers the fetch shader sets to 1.0, in its order among the loads
+    u32 one = 0;
+    const auto set_ones = [&](u32 loaded) {
+        for (; one < fetch_data.ones.size() && fetch_data.ones[one].attributes <= loaded; ++one) {
+            ir.SetVectorReg(IR::VectorReg(fetch_data.ones[one].vgpr), ir.Imm32(1.f));
+        }
+    };
     for (u32 semantic = 0; semantic < fetch_data.attributes.size(); ++semantic) {
         Shader::Gcn::VertexAttribute const& attrib = fetch_data.attributes[semantic];
+        set_ones(semantic);
         const IR::Attribute attr{IR::Attribute::Param0 + semantic};
         IR::VectorReg dst_reg{attrib.dest_vgpr};
 
@@ -1210,6 +1218,7 @@ void Translator::EmitFetch(const GcnInst& inst) {
             ir.SetVectorReg(dst_reg++, IR::F32{ir.CompositeExtract(swizzled, i)});
         }
     }
+    set_ones(static_cast<u32>(fetch_data.attributes.size()));
 }
 
 void Translator::LogMissingOpcode(const GcnInst& inst) {

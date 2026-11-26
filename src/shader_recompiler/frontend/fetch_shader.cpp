@@ -54,6 +54,7 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
     }
 
     out_fetch_data.attributes.clear();
+    out_fetch_data.ones.clear();
 
     struct VsharpLoad {
         u32 dword_offset{};
@@ -133,7 +134,10 @@ bool ParseFetchShader(const Shader::Info& info, FetchShaderData& out_fetch_data)
             const u32 src0 = word0 & 0x1ff;
             const u32 vdst = (word0 >> 17) & 0xff;
             ASSERT(opcode == OpcodeVOP1::V_MOV_B32 && src0 == 242);
-            LOG_WARNING(Render_Recompiler, "Fetch shader has V%u = 1.0 which is ignored", vdst);
+            // A load writes its own elements only, so the constant has to be set as well (as
+            // Pink-shadPS4 and Shadow of the Colossus's PC port do)
+            out_fetch_data.ones.push_back(VertexOne{
+                static_cast<u8>(vdst), static_cast<u8>(out_fetch_data.attributes.size())});
         } else {
             UNREACHABLE_MSG("Unexpected instruction encoding in fetch shader %u", u32(encoding));
         }

@@ -14,8 +14,8 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 14u; // 14: debug names only when dumping
-static constexpr u32 ShaderMetaVersion = 7u;    // 7: the whole Info, the walker as made
+static constexpr u32 ShaderBinaryVersion = 15u; // 15: the fetch shader's 1.0 registers
+static constexpr u32 ShaderMetaVersion = 8u;    // 8: the fetch shader's 1.0 registers
 static constexpr u32 PipelineKeyVersion = 3u;
 } // namespace Serialization
 
@@ -555,12 +555,14 @@ bool Info::Deserialize(Serialization::Archive& ar) {
 
 void Gcn::FetchShaderData::Serialize(Serialization::Archive& ar) const {
     Serialization::Writer fetch{ar};
-    ar.Grow(6 + attributes.size() * sizeof(VertexAttribute));
+    ar.Grow(6 + 2 * sizeof(size_t) + attributes.size() * sizeof(VertexAttribute) +
+            ones.size() * sizeof(VertexOne));
 
     fetch.Write(size);
     fetch.Write(vertex_offset_sgpr);
     fetch.Write(instance_offset_sgpr);
     fetch.Write(attributes);
+    fetch.Write(ones);
 }
 
 bool Gcn::FetchShaderData::Deserialize(Serialization::Archive& ar) {
@@ -570,6 +572,7 @@ bool Gcn::FetchShaderData::Deserialize(Serialization::Archive& ar) {
     fetch.Read(vertex_offset_sgpr);
     fetch.Read(instance_offset_sgpr);
     fetch.Read(attributes);
+    fetch.Read(ones);
 
     return true;
 }
