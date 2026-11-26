@@ -154,13 +154,89 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
     }
 }
 
-// The most loop passes one run of a shader may make, over all its loops together. A game's loop
-// often ends on a value read from memory; fed stale data it can go round billions of times, which
-// ends in a GPU timeout and a lost device. Real content stays far below this, so cutting the
+// The most loop passes one run of a shader may make, over all the loops it is counted in. A game's
+// loop often ends on a value read from memory; fed stale data it can go round billions of times,
+// which ends in a GPU timeout and a lost device. Real content stays far below this, so cutting the
 // loops short spoils one frame at worst instead of ending the session.
 static constexpr u32 LoopPassBudget = 1U << 18;
 
+// What a shader reads from memory, or what the command buffer gave it
+static bool ReadsMemory(IR::Opcode op) {
+    using IR::Opcode;
+    const u32 o = static_cast<u32>(op);
+    const auto in = [o](Opcode first, Opcode last) {
+        return o >= static_cast<u32>(first) && o <= static_cast<u32>(last);
+    };
+    return op == Opcode::ReadConst || op == Opcode::ReadConstBuffer || op == Opcode::GetUserData ||
+           op == Opcode::GetAttribute || op == Opcode::GetTessGenericAttribute ||
+           op == Opcode::ReadTcsGenericOuputAttribute || op == Opcode::DataAppend ||
+           op == Opcode::DataConsume || in(Opcode::LoadSharedU16, Opcode::SharedAtomicCmpSwap64) ||
+           in(Opcode::LoadBufferU8, Opcode::LoadBufferFormatF32) ||
+           in(Opcode::BufferAtomicIAdd32, Opcode::BufferAtomicFCmpSwap32) ||
+           in(Opcode::ImageSampleRaw, Opcode::ImageAtomicCmpSwap32);
+}
+
+// Whether a loop's exit depends on something read from memory, which stale data can make go
+// round for ever. A loop that only counts, like a blur's fixed number of taps, is left as it is:
+// the budget's counter and extra exit would keep the driver from unrolling it.
+static bool ExitReadsMemory(const IR::U1& cond, u64_map_t& visited,
+                            Common::SmallVector<const IR::Inst*, 64>& stack) {
+    if (cond.IsImmediate()) {
+        return false;
+    }
+    u64_map_clear(&visited);
+    stack.clear();
+    stack.push_back(cond.Inst());
+    (void)u64_map_insert(&visited, reinterpret_cast<u64>(cond.Inst()), nullptr);
+    while (!stack.empty()) {
+        const IR::Inst* inst = stack.back();
+        stack.pop_back();
+        if (ReadsMemory(inst->GetOpcode())) {
+            return true;
+        }
+        for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+            const IR::Inst* arg_inst = inst->Arg(arg).TryInst();
+            bool inserted = false;
+            if (arg_inst != nullptr) {
+                (void)u64_map_insert(&visited, reinterpret_cast<u64>(arg_inst), &inserted);
+                if (inserted) {
+                    stack.push_back(arg_inst);
+                }
+            }
+        }
+    }
+    return false;
+}
+
 void Traverse(EmitContext& ctx, const IR::Program& program) {
+    // The loops that get the budget, by their merge block
+    u64_map_t budgeted;
+    u64_map_init(&budgeted, sizeof(u8), 8);
+    {
+        u64_map_t visited;
+        u64_map_init(&visited, sizeof(u8), 64);
+        Common::SmallVector<const IR::Inst*, 64> stack;
+        for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
+            const IR::Block* merge = nullptr;
+            const IR::U1* cond = nullptr;
+            if (node.type == IR::AbstractSyntaxNode::Type::Repeat) {
+                merge = node.data.repeat.merge;
+                cond = &node.data.repeat.cond;
+            } else if (node.type == IR::AbstractSyntaxNode::Type::Break) {
+                merge = node.data.break_node.merge;
+                cond = &node.data.break_node.cond;
+            }
+            if (merge != nullptr && !u64_map_find(&budgeted, reinterpret_cast<u64>(merge)) &&
+                ExitReadsMemory(*cond, visited, stack)) {
+                (void)u64_map_insert(&budgeted, reinterpret_cast<u64>(merge), nullptr);
+            }
+        }
+        u64_map_free(&visited);
+    }
+    const auto is_budgeted = [&budgeted](const IR::Block* merge) {
+        return u64_map_find(&budgeted, reinterpret_cast<u64>(merge)) != nullptr;
+    };
+
     Id loop_counter{};
     const auto get_loop_counter = [&] {
         if (loop_counter == 0) {
@@ -201,7 +277,7 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             const Id continue_label{node.data.loop.continue_block->Definition<Id>()};
             const Id endloop_label{node.data.loop.merge->Definition<Id>()};
 
-            {
+            if (is_budgeted(node.data.loop.merge)) {
                 // The header runs once a pass
                 const Id counter{get_loop_counter()};
                 const Id count{spv_OpLoad(&ctx.m, ctx.U32[1], counter)};
@@ -228,7 +304,7 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             Id cond{ctx.Def(node.data.repeat.cond)};
             const Id loop_header_label{node.data.repeat.loop_header->Definition<Id>()};
             const Id merge_label{node.data.repeat.merge->Definition<Id>()};
-            {
+            if (is_budgeted(node.data.repeat.merge)) {
                 const Id count{spv_OpLoad(&ctx.m, ctx.U32[1], get_loop_counter())};
                 const Id within{
                     spv_OpULessThan(&ctx.m, ctx.U1[1], count, ctx.ConstU32(LoopPassBudget))};
@@ -248,6 +324,7 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             current_block = nullptr;
         }
     }
+    u64_map_free(&budgeted);
 }
 
 Id DefineMain(EmitContext& ctx, const IR::Program& program) {

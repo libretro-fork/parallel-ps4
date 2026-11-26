@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Shaders: the loop pass budget goes only on loops whose exit depends on something read from memory (buffers, constants, shared memory, images, user data, attributes), which stale data can keep going round. A loop that only counts, like a blur's fixed number of taps, no longer gets the counter and the extra exit, which kept the driver from unrolling it and cost GPU time in every game. Shaders are compiled again once (version 21). Not run in a game yet.
+
 - libSceNpCommerce is MSVC C89 (np_commerce.c), registered in libs.cpp, with its own log class in the C bridge. The store's dialog and icon still go to the overlay with the same status, result and error values. Not run in a game yet.
 
 - libkernel's sceKernelDebugOutText is MSVC C89 (kernel/debug.c), registered in kernel.cpp. It still writes the text to the game's standard output. Not run in a game yet.
