@@ -28,4 +28,17 @@
             <Line Type="mask" Address="41 C7 85 F4 07 00 00 00 01 00 00 41 C7 85 F8 07 00 00 00 04 00 00" Value="00020000" Offset="18"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Highest Model Detail Everywhere"
+              Note="Every model is drawn with its most detailed mesh at any distance. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row and then shifted by one offset of its own and kept within 0 to 2. It does that in five places, for the different kinds of model; shadPS4's Model LOD -2 sets the offset in one of them. This sets it to -2 in all five, so every model stays at level 0, with its full-detail textures, parts with no LodBank row among them. It costs GPU time: more triangles far away. Do not turn it on with shadPS4's Model LOD 1 or Model LOD 2. Found by the game's own code, so every version of the game that has it gets it."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 03 83 F8 02 B9 02 00 00 00 0F 4E C8" Value="B8FEFFFFFF90" Offset="0"/>
+            <Line Type="mask" Address="48 8B 87 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BA 02 00 00 00" Value="B9FEFFFFFF90" Offset="7"/>
+            <Line Type="mask" Address="48 8B 83 70 07 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 B8 02 00 00 00" Value="B9FEFFFFFF90" Offset="7"/>
+            <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 07 83 F8 02 B9 02 00 00 00" Value="B8FEFFFFFF90" Offset="0"/>
+            <Line Type="mask" Address="48 8B 82 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BE 02 00 00 00" Value="B9FEFFFFFF90" Offset="7"/>
+        </PatchList>
+    </Metadata>
 </Patch>

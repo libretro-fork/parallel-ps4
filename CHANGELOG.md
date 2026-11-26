@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Patch Manager: Bloodborne gets "Highest Model Detail Everywhere", one of the core's own patches. The game picks a model's detail level (0 to 2, from its LodBank distances plus an offset of the game's) in five places; shadPS4's Model LOD -2 sets the offset in one of them, this sets it to -2 in all five, so every model stays at full detail. Found by byte patterns that occur once each in the 1.09 eboot, checked by applying them to it and reading the code back. Not run in the game yet.
+
 - The trophy notification is MSVC C89 (np/trophy_ui.c): its sound, decoded and resampled once at start, and its popup, with the icons mapped where they lie or lent from the core's embedded files. The C bridge gains the embedded resources and a trophy log class. Not run in a game yet.
 
 - Shaders: the loop pass budget goes only on loops whose exit depends on something read from memory (buffers, constants, shared memory, images, user data, attributes), which stale data can keep going round. A loop that only counts, like a blur's fixed number of taps, no longer gets the counter and the extra exit, which kept the driver from unrolling it and cost GPU time in every game. Shaders are compiled again once (version 21). Not run in a game yet.
