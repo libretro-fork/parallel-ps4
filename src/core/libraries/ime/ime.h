@@ -18,7 +18,7 @@ int PS4_SYSV_ABI InitializeImeModule();
 int PS4_SYSV_ABI sceImeCheckFilterText();
 int PS4_SYSV_ABI sceImeCheckRemoteEventParam();
 int PS4_SYSV_ABI sceImeCheckUpdateTextInfo();
-Error PS4_SYSV_ABI sceImeClose();
+OrbisImeError PS4_SYSV_ABI sceImeClose();
 int PS4_SYSV_ABI sceImeConfigGet();
 int PS4_SYSV_ABI sceImeConfigSet();
 int PS4_SYSV_ABI sceImeConfirmCandidate(s32 index);
@@ -32,25 +32,26 @@ int PS4_SYSV_ABI sceImeDisableController();
 int PS4_SYSV_ABI sceImeFilterText();
 int PS4_SYSV_ABI sceImeForTestFunction();
 int PS4_SYSV_ABI sceImeGetPanelPositionAndForm(OrbisImePositionAndForm* posForm);
-Error PS4_SYSV_ABI sceImeGetPanelSize(const OrbisImeParam* param, u32* width, u32* height);
-Error PS4_SYSV_ABI sceImeKeyboardClose(OrbisUserServiceUserId userId);
+OrbisImeError PS4_SYSV_ABI sceImeGetPanelSize(const OrbisImeParam* param, u32* width, u32* height);
+OrbisImeError PS4_SYSV_ABI sceImeKeyboardClose(OrbisUserServiceUserId userId);
 int PS4_SYSV_ABI sceImeKeyboardGetInfo(u32 resourceId, OrbisImeKeyboardInfo* info);
-Error PS4_SYSV_ABI sceImeKeyboardGetResourceId(OrbisUserServiceUserId userId,
-                                               OrbisImeKeyboardResourceIdArray* resourceIdArray);
-Error PS4_SYSV_ABI sceImeKeyboardOpen(OrbisUserServiceUserId userId,
-                                      const OrbisImeKeyboardParam* param);
+OrbisImeError PS4_SYSV_ABI sceImeKeyboardGetResourceId(
+    OrbisUserServiceUserId userId, OrbisImeKeyboardResourceIdArray* resourceIdArray);
+OrbisImeError PS4_SYSV_ABI sceImeKeyboardOpen(OrbisUserServiceUserId userId,
+                                              const OrbisImeKeyboardParam* param);
 int PS4_SYSV_ABI sceImeKeyboardOpenInternal();
 int PS4_SYSV_ABI sceImeKeyboardSetMode(OrbisUserServiceUserId userId, u32 mode);
 int PS4_SYSV_ABI sceImeKeyboardUpdate();
-Error PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param, const OrbisImeParamExtended* extended);
+OrbisImeError PS4_SYSV_ABI sceImeOpen(const OrbisImeParam* param,
+                                      const OrbisImeParamExtended* extended);
 int PS4_SYSV_ABI sceImeOpenInternal();
 void PS4_SYSV_ABI sceImeParamInit(OrbisImeParam* param);
 int PS4_SYSV_ABI sceImeSetCandidateIndex(s32 index);
-Error PS4_SYSV_ABI sceImeSetCaret(const OrbisImeCaret* caret);
-Error PS4_SYSV_ABI sceImeSetText(const char16_t* text, u32 length);
+OrbisImeError PS4_SYSV_ABI sceImeSetCaret(const OrbisImeCaret* caret);
+OrbisImeError PS4_SYSV_ABI sceImeSetText(const char16_t* text, u32 length);
 int PS4_SYSV_ABI sceImeSetTextGeometry(OrbisImeTextAreaMode mode,
                                        const OrbisImeTextGeometry* geometry);
-Error PS4_SYSV_ABI sceImeUpdate(OrbisImeEventHandler handler);
+OrbisImeError PS4_SYSV_ABI sceImeUpdate(OrbisImeEventHandler handler);
 int PS4_SYSV_ABI sceImeVshClearPreedit();
 int PS4_SYSV_ABI sceImeVshClose();
 int PS4_SYSV_ABI sceImeVshConfirmPreedit();

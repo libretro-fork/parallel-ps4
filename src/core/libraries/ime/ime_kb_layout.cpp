@@ -104,12 +104,12 @@ constexpr u16 kCodeSpace = 0x002C;      // SCE_IME_KEYCODE_SPACEBAR
 constexpr u16 kCodeBackspace = 0x002A;  // SCE_IME_KEYCODE_BACKSPACE
 constexpr u16 kCodeReturn = 0x0028;     // SCE_IME_KEYCODE_RETURN
 constexpr u16 kCodeLeftShift = 0x00E1;  // SCE_IME_KEYCODE_LEFTSHIFT
-constexpr u64 kMaskDollarPreferred = static_cast<u64>(OrbisImeLanguage::ENGLISH_US) |
-                                     static_cast<u64>(OrbisImeLanguage::SPANISH_LA) |
-                                     static_cast<u64>(OrbisImeLanguage::PORTUGUESE_BR);
-constexpr u64 kMaskPoundPreferred = static_cast<u64>(OrbisImeLanguage::ENGLISH_GB);
-constexpr u64 kMaskYenPreferred = static_cast<u64>(OrbisImeLanguage::JAPANESE);
-constexpr u64 kMaskWonPreferred = static_cast<u64>(OrbisImeLanguage::KOREAN);
+constexpr u64 kMaskDollarPreferred = static_cast<u64>(ORBIS_IME_LANGUAGE_ENGLISH_US) |
+                                     static_cast<u64>(ORBIS_IME_LANGUAGE_SPANISH_LA) |
+                                     static_cast<u64>(ORBIS_IME_LANGUAGE_PORTUGUESE_BR);
+constexpr u64 kMaskPoundPreferred = static_cast<u64>(ORBIS_IME_LANGUAGE_ENGLISH_GB);
+constexpr u64 kMaskYenPreferred = static_cast<u64>(ORBIS_IME_LANGUAGE_JAPANESE);
+constexpr u64 kMaskWonPreferred = static_cast<u64>(ORBIS_IME_LANGUAGE_KOREAN);
 
 enum class ImeKbCurrencyProfile : u8 {
     Euro = 0,
@@ -420,13 +420,13 @@ constexpr ImeKbLayoutModel MakeLayoutModel(
 
 const char* GetEnterLabel(OrbisImeEnterLabel label) {
     switch (label) {
-    case OrbisImeEnterLabel::Go:
+    case ORBIS_IME_ENTER_LABEL_GO:
         return "Go";
-    case OrbisImeEnterLabel::Search:
+    case ORBIS_IME_ENTER_LABEL_SEARCH:
         return "Search";
-    case OrbisImeEnterLabel::Send:
+    case ORBIS_IME_ENTER_LABEL_SEND:
         return "Send";
-    case OrbisImeEnterLabel::Default:
+    case ORBIS_IME_ENTER_LABEL_DEFAULT:
     default:
         return "Done";
     }
@@ -1182,7 +1182,7 @@ ImeStyleConfig ResolveImeStyleConfig(const OrbisImeParamExtended* extended) {
     if (!extended) {
         return style;
     }
-    if (!True(extended->option & OrbisImeExtOption::SET_COLOR)) {
+    if (!((extended->option & ORBIS_IME_EXT_OPTION_SET_COLOR) != 0)) {
         return style;
     }
 

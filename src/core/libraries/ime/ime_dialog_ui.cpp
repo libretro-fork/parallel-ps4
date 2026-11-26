@@ -85,9 +85,9 @@ size_t BoundedUtf16Length(const char16_t* text, size_t max_len) {
 
 ImeDialogState::ImeDialogState()
     : input_changed(false), user_id(-1), is_multi_line(false), is_numeric(false),
-      fixed_position(false), type(OrbisImeType::Default),
+      fixed_position(false), type(ORBIS_IME_TYPE_DEFAULT),
       supported_languages(static_cast<OrbisImeLanguage>(0)),
-      enter_label(OrbisImeEnterLabel::Default), text_filter(nullptr), keyboard_filter(nullptr),
+      enter_label(ORBIS_IME_ENTER_LABEL_DEFAULT), text_filter(nullptr), keyboard_filter(nullptr),
       max_text_length(ORBIS_IME_DIALOG_MAX_TEXT_LENGTH), text_buffer(nullptr), original_text(),
       title(), placeholder(), current_text() {}
 
@@ -104,18 +104,18 @@ ImeDialogState::ImeDialogState(const OrbisImeDialogParam* param,
     }
 
     user_id = param->user_id;
-    is_multi_line = True(param->option & OrbisImeOption::MULTILINE);
-    fixed_position = True(param->option & OrbisImeOption::FIXED_POSITION);
-    use_over2k = True(param->option & OrbisImeOption::USE_OVER_2K_COORDINATES);
-    is_numeric = param->type == OrbisImeType::Number;
+    is_multi_line = ((param->option & ORBIS_IME_OPTION_MULTILINE) != 0);
+    fixed_position = ((param->option & ORBIS_IME_OPTION_FIXED_POSITION) != 0);
+    use_over2k = ((param->option & ORBIS_IME_OPTION_USE_OVER_2K_COORDINATES) != 0);
+    is_numeric = param->type == ORBIS_IME_TYPE_NUMBER;
     type = param->type;
     supported_languages = param->supported_languages;
     enter_label = param->enter_label;
     text_filter = param->filter;
     keyboard_filter = extended ? extended->ext_keyboard_filter : nullptr;
-    ext_option = extended ? extended->option : OrbisImeExtOption::DEFAULT;
-    disable_device = extended ? extended->disable_device : OrbisImeDisableDevice::DEFAULT;
-    panel_priority = extended ? extended->priority : OrbisImePanelPriority::Default;
+    ext_option = extended ? extended->option : ORBIS_IME_EXT_OPTION_DEFAULT;
+    disable_device = extended ? extended->disable_device : ORBIS_IME_DISABLE_DEVICE_DEFAULT;
+    panel_priority = extended ? extended->priority : ORBIS_IME_PANEL_PRIORITY_DEFAULT;
     style_config = Libraries::Ime::ResolveImeStyleConfig(extended);
     max_text_length = param->max_text_length;
     text_buffer = param->input_text_buffer;
@@ -123,10 +123,10 @@ ImeDialogState::ImeDialogState(const OrbisImeDialogParam* param,
              "ImeDialogState: option=0x%X (multiline=%s, password=%s, ext_kbd=%s, fixed_pos=%s, "
              "over2k=%s), enter_label=%u, type=%u",
              static_cast<u32>(param->option), (is_multi_line) ? "true" : "false",
-             (True(param->option & OrbisImeOption::PASSWORD)) ? "true" : "false",
-             (True(param->option & OrbisImeOption::EXT_KEYBOARD)) ? "true" : "false",
-             (True(param->option & OrbisImeOption::FIXED_POSITION)) ? "true" : "false",
-             (True(param->option & OrbisImeOption::USE_OVER_2K_COORDINATES)) ? "true" : "false",
+             (((param->option & ORBIS_IME_OPTION_PASSWORD) != 0)) ? "true" : "false",
+             (((param->option & ORBIS_IME_OPTION_EXT_KEYBOARD) != 0)) ? "true" : "false",
+             (((param->option & ORBIS_IME_OPTION_FIXED_POSITION) != 0)) ? "true" : "false",
+             (((param->option & ORBIS_IME_OPTION_USE_OVER_2K_COORDINATES) != 0)) ? "true" : "false",
              static_cast<u32>(enter_label), static_cast<u32>(type));
     LOG_DEBUG(Lib_ImeDialog,
               "ImeDialogState: user_id=%u, type=%u, enter_label=%u, multiline=%s, numeric=%s, "
@@ -547,14 +547,14 @@ void ImeDialogUi::Draw() {
     if (has_layout) {
         base_x = viewport_offset.x + layout.posx * scale_x;
         base_y = viewport_offset.y + layout.posy * scale_y;
-        if (layout.horizontal_alignment == OrbisImeHorizontalAlignment::Center) {
+        if (layout.horizontal_alignment == ORBIS_IME_HORIZONTAL_ALIGNMENT_CENTER) {
             base_x -= window_size.x * 0.5f;
-        } else if (layout.horizontal_alignment == OrbisImeHorizontalAlignment::Right) {
+        } else if (layout.horizontal_alignment == ORBIS_IME_HORIZONTAL_ALIGNMENT_RIGHT) {
             base_x -= window_size.x;
         }
-        if (layout.vertical_alignment == OrbisImeVerticalAlignment::Center) {
+        if (layout.vertical_alignment == ORBIS_IME_VERTICAL_ALIGNMENT_CENTER) {
             base_y -= window_size.y * 0.5f;
-        } else if (layout.vertical_alignment == OrbisImeVerticalAlignment::Bottom) {
+        } else if (layout.vertical_alignment == ORBIS_IME_VERTICAL_ALIGNMENT_BOTTOM) {
             base_y -= window_size.y;
         }
     } else {
@@ -622,7 +622,7 @@ void ImeDialogUi::Draw() {
             Libraries::Ime::ComputeImePanelMetrics(metrics_cfg);
 
         const bool controller_shortcuts_disabled =
-            True(state->disable_device & OrbisImeDisableDevice::CONTROLLER);
+            ((state->disable_device & ORBIS_IME_DISABLE_DEVICE_CONTROLLER) != 0);
         const bool allow_osk_shortcuts = !controller_shortcuts_disabled;
         OskPadInputState panel_pad_state{
             prev_virtual_buttons,

@@ -30,26 +30,27 @@ struct OrbisImeDialogResult {
     s8 reserved[12];
 };
 
-Error PS4_SYSV_ABI sceImeDialogAbort();
-Error PS4_SYSV_ABI sceImeDialogForceClose();
-Error PS4_SYSV_ABI sceImeDialogForTestFunction();
+OrbisImeError PS4_SYSV_ABI sceImeDialogAbort();
+OrbisImeError PS4_SYSV_ABI sceImeDialogForceClose();
+OrbisImeError PS4_SYSV_ABI sceImeDialogForTestFunction();
 int PS4_SYSV_ABI sceImeDialogGetCurrentStarState(s64 param_1);
 int PS4_SYSV_ABI sceImeDialogGetPanelPositionAndForm(OrbisImePositionAndForm* posForm);
-Error PS4_SYSV_ABI sceImeDialogGetPanelSize(const OrbisImeDialogParam* param, u32* width,
-                                            u32* height);
-Error PS4_SYSV_ABI sceImeDialogGetPanelSizeExtended(const OrbisImeDialogParam* param,
-                                                    const OrbisImeParamExtended* extended,
-                                                    u32* width, u32* height);
-Error PS4_SYSV_ABI sceImeDialogGetResult(OrbisImeDialogResult* result);
+OrbisImeError PS4_SYSV_ABI sceImeDialogGetPanelSize(const OrbisImeDialogParam* param, u32* width,
+                                                    u32* height);
+OrbisImeError PS4_SYSV_ABI sceImeDialogGetPanelSizeExtended(const OrbisImeDialogParam* param,
+                                                            const OrbisImeParamExtended* extended,
+                                                            u32* width, u32* height);
+OrbisImeError PS4_SYSV_ABI sceImeDialogGetResult(OrbisImeDialogResult* result);
 OrbisImeDialogStatus PS4_SYSV_ABI sceImeDialogGetStatus();
-Error PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param, OrbisImeParamExtended* extended);
+OrbisImeError PS4_SYSV_ABI sceImeDialogInit(OrbisImeDialogParam* param,
+                                            OrbisImeParamExtended* extended);
 int PS4_SYSV_ABI sceImeDialogInitInternal(OrbisImeDialogParam* param,
                                           OrbisImeParamExtended* extended);
 int PS4_SYSV_ABI sceImeDialogInitInternal2(int* param_1, u32* param_2, u32 param_3, u64 param_4);
 int PS4_SYSV_ABI sceImeDialogInitInternal3(int* param_1, u32* param_2, u32 param_3, u64 param_4,
                                            u32 param_5, u32 param_6);
 int PS4_SYSV_ABI sceImeDialogSetPanelPosition(s32 posx, s32 posy);
-Error PS4_SYSV_ABI sceImeDialogTerm();
+OrbisImeError PS4_SYSV_ABI sceImeDialogTerm();
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 } // namespace Libraries::ImeDialog

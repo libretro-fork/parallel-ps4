@@ -124,7 +124,7 @@ void ImeState::SendEvent(OrbisImeEvent* event) {
 
 void ImeState::SendEnterEvent() {
     OrbisImeEvent enterEvent{};
-    enterEvent.id = OrbisImeEventId::PressEnter;
+    enterEvent.id = ORBIS_IME_EVENT_ID_PRESS_ENTER;
 
     // Include current text payload for consumers expecting text with Enter
     OrbisImeEditText text{};
@@ -143,7 +143,7 @@ void ImeState::SendEnterEvent() {
         const u32 caret = static_cast<u32>(std::clamp(caret_index, 0, static_cast<int>(len)));
         text.caret_index = caret;
         text.area_num = 1;
-        text.text_area[0].mode = OrbisImeTextAreaMode::Edit;
+        text.text_area[0].mode = ORBIS_IME_TEXT_AREA_MODE_EDIT;
         // No edit happening on Enter: length=0; index can be caret
         text.text_area[0].index = caret;
         text.text_area[0].length = 0;
@@ -158,7 +158,7 @@ void ImeState::SendEnterEvent() {
 
 void ImeState::SendCloseEvent() {
     OrbisImeEvent closeEvent{};
-    closeEvent.id = OrbisImeEventId::PressClose;
+    closeEvent.id = ORBIS_IME_EVENT_ID_PRESS_CLOSE;
 
     // Populate text payload with current buffer snapshot
     OrbisImeEditText text{};
@@ -177,7 +177,7 @@ void ImeState::SendCloseEvent() {
         const u32 caret = static_cast<u32>(std::clamp(caret_index, 0, static_cast<int>(len)));
         text.caret_index = caret;
         text.area_num = 1;
-        text.text_area[0].mode = OrbisImeTextAreaMode::Edit;
+        text.text_area[0].mode = ORBIS_IME_TEXT_AREA_MODE_EDIT;
         // No edit happening on Close: length=0; index can be caret
         text.text_area[0].index = caret;
         text.text_area[0].length = 0;
@@ -244,9 +244,9 @@ ImeUi::ImeUi(ImeState* state, const OrbisImeParam* param, const OrbisImeParamExt
       style_config(ResolveImeStyleConfig(extended)) {
     if (param) {
         const OrbisImeExtOption ext_option =
-            extended_param ? extended_param->option : OrbisImeExtOption::DEFAULT;
+            extended_param ? extended_param->option : ORBIS_IME_EXT_OPTION_DEFAULT;
         const OrbisImePanelPriority panel_priority =
-            extended_param ? extended_param->priority : OrbisImePanelPriority::Default;
+            extended_param ? extended_param->priority : ORBIS_IME_PANEL_PRIORITY_DEFAULT;
         kb_layout_selection = ResolveInitialKbLayoutSelection(ext_option, panel_priority);
         last_nav_layout_selection = kb_layout_selection;
         nav_layout_selection_initialized = true;
@@ -373,7 +373,7 @@ void ImeUi::Draw() {
         ReadVirtualPadSnapshot(ime_param->user_id, ovl_delta_time());
 
     const bool use_over2k =
-        (ime_param->option & OrbisImeOption::USE_OVER_2K_COORDINATES) != OrbisImeOption::DEFAULT;
+        (ime_param->option & ORBIS_IME_OPTION_USE_OVER_2K_COORDINATES) != ORBIS_IME_OPTION_DEFAULT;
     const auto viewport = Libraries::Ime::ComputeImeViewportMetrics(use_over2k);
     const float scale_x = viewport.scale_x;
     const float scale_y = viewport.scale_y;
@@ -394,14 +394,14 @@ void ImeUi::Draw() {
 
     float pos_x = viewport.offset.x + ime_param->posx * scale_x;
     float pos_y = viewport.offset.y + ime_param->posy * scale_y;
-    if (ime_param->horizontal_alignment == OrbisImeHorizontalAlignment::Center) {
+    if (ime_param->horizontal_alignment == ORBIS_IME_HORIZONTAL_ALIGNMENT_CENTER) {
         pos_x -= window_size.x * 0.5f;
-    } else if (ime_param->horizontal_alignment == OrbisImeHorizontalAlignment::Right) {
+    } else if (ime_param->horizontal_alignment == ORBIS_IME_HORIZONTAL_ALIGNMENT_RIGHT) {
         pos_x -= window_size.x;
     }
-    if (ime_param->vertical_alignment == OrbisImeVerticalAlignment::Center) {
+    if (ime_param->vertical_alignment == ORBIS_IME_VERTICAL_ALIGNMENT_CENTER) {
         pos_y -= window_size.y * 0.5f;
-    } else if (ime_param->vertical_alignment == OrbisImeVerticalAlignment::Bottom) {
+    } else if (ime_param->vertical_alignment == ORBIS_IME_VERTICAL_ALIGNMENT_BOTTOM) {
         pos_y -= window_size.y;
     }
     const float min_x = viewport.offset.x;
@@ -411,7 +411,7 @@ void ImeUi::Draw() {
     pos_x = std::clamp(pos_x, min_x, max_x);
     pos_y = std::clamp(pos_y, min_y, max_y);
 
-    const bool panel_position_locked = True(ime_param->option & OrbisImeOption::FIXED_POSITION);
+    const bool panel_position_locked = ((ime_param->option & ORBIS_IME_OPTION_FIXED_POSITION) != 0);
     if (!panel_position_initialized) {
         panel_position = {pos_x, pos_y};
         panel_position_initialized = true;
@@ -448,7 +448,7 @@ void ImeUi::Draw() {
         const Libraries::Ime::ImePanelMetricsConfig metrics_cfg{
             .panel_w = window_size.x,
             .panel_h = window_size.y,
-            .multiline = True(ime_param->option & OrbisImeOption::MULTILINE),
+            .multiline = ((ime_param->option & ORBIS_IME_OPTION_MULTILINE) != 0),
             .show_title = false,
             .base_font_size = ovl_font_current_size(),
             .window_pos = ovl_window_pos(),
@@ -458,7 +458,7 @@ void ImeUi::Draw() {
 
         const bool controller_shortcuts_disabled =
             extended_param &&
-            True(extended_param->disable_device & OrbisImeDisableDevice::CONTROLLER);
+            ((extended_param->disable_device & ORBIS_IME_DISABLE_DEVICE_CONTROLLER) != 0);
         const bool allow_osk_shortcuts = !controller_shortcuts_disabled;
         OskPadInputState panel_pad_state{
             prev_virtual_buttons,
@@ -869,12 +869,12 @@ void ImeUi::Draw() {
             event_param.str = reinterpret_cast<char16_t*>(state->work_buffer);
             event_param.area_num = 1;
             event_param.caret_index = static_cast<u32>(std::max(0, caret_utf16));
-            event_param.text_area[0].mode = OrbisImeTextAreaMode::Edit;
+            event_param.text_area[0].mode = ORBIS_IME_TEXT_AREA_MODE_EDIT;
             event_param.text_area[0].index = static_cast<u32>(std::max(0, edit_index_utf16));
             event_param.text_area[0].length = static_cast<s32>(edit_delta_utf16);
 
             OrbisImeEvent event{};
-            event.id = OrbisImeEventId::UpdateText;
+            event.id = ORBIS_IME_EVENT_ID_UPDATE_TEXT;
             event.param.text = event_param;
             state->SendEvent(&event);
         };
@@ -886,11 +886,11 @@ void ImeUi::Draw() {
             const bool move_right = delta > 0;
             const u32 steps = static_cast<u32>(std::abs(delta));
             const OrbisImeCaretMovementDirection direction =
-                move_right ? OrbisImeCaretMovementDirection::Right
-                           : OrbisImeCaretMovementDirection::Left;
+                move_right ? ORBIS_IME_CARET_MOVEMENT_DIRECTION_RIGHT
+                           : ORBIS_IME_CARET_MOVEMENT_DIRECTION_LEFT;
             for (u32 i = 0; i < steps; ++i) {
                 OrbisImeEvent caret_step{};
-                caret_step.id = OrbisImeEventId::UpdateCaret;
+                caret_step.id = ORBIS_IME_EVENT_ID_UPDATE_CARET;
                 caret_step.param.caret_move = direction;
                 state->SendEvent(&caret_step);
             }

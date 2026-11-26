@@ -33,9 +33,9 @@ class ImeDialogState final {
     bool panel_layout_valid = false;
     u32 panel_req_width = 0;
     u32 panel_req_height = 0;
-    OrbisImeExtOption ext_option = OrbisImeExtOption::DEFAULT;
-    OrbisImeDisableDevice disable_device = OrbisImeDisableDevice::DEFAULT;
-    OrbisImePanelPriority panel_priority = OrbisImePanelPriority::Default;
+    OrbisImeExtOption ext_option = ORBIS_IME_EXT_OPTION_DEFAULT;
+    OrbisImeDisableDevice disable_device = ORBIS_IME_DISABLE_DEVICE_DEFAULT;
+    OrbisImePanelPriority panel_priority = ORBIS_IME_PANEL_PRIORITY_DEFAULT;
     Libraries::Ime::ImeStyleConfig style_config{};
 
     s32 user_id{};

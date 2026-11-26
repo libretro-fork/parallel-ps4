@@ -129,6 +129,34 @@ ENUMS = [
 ]
 
 
+# Enums that are macros in a C header (their values do not fit a C89 enum, or the game's
+# structures hold them as integers): the table's name, its header and the macros' prefix
+MACRO_ENUMS = {
+    "OrbisImeDisableDevice": ("core/libraries/ime/ime_common.h", "ORBIS_IME_DISABLE_DEVICE_"),
+    "OrbisImeExtOption": ("core/libraries/ime/ime_common.h", "ORBIS_IME_EXT_OPTION_"),
+    "OrbisImeInitExtKeyboardMode": ("core/libraries/ime/ime_common.h",
+                                    "ORBIS_IME_INIT_EXT_KEYBOARD_MODE_"),
+    "OrbisImeInputMethodState": ("core/libraries/ime/ime_common.h",
+                                 "ORBIS_IME_INPUT_METHOD_STATE_"),
+    "OrbisImeKeyboardOption": ("core/libraries/ime/ime_common.h", "ORBIS_IME_KEYBOARD_OPTION_"),
+    "OrbisImeKeycodeState": ("core/libraries/ime/ime_common.h", "ORBIS_IME_KEYCODE_STATE_"),
+    "OrbisImeLanguage": ("core/libraries/ime/ime_common.h", "ORBIS_IME_LANGUAGE_"),
+    "OrbisImeOption": ("core/libraries/ime/ime_common.h", "ORBIS_IME_OPTION_"),
+}
+
+
+def macro_enum(header, prefix):
+    """The (name, value) of each '#define <prefix>NAME <integer expression>' of a header"""
+    import re
+    out = []
+    for m in re.finditer(r"^#define (" + prefix + r"\w+) (.+?)(?:\s*/\*.*)?$",
+                         open(os.path.join(SRC, header)).read(), re.M):
+        expr = re.sub(r"\((?:u64|u32)\)", "", m.group(2))
+        expr = re.sub(r"\b(0x[0-9a-fA-F]+|\d+)u\b", r"\1", expr)
+        out.append((m.group(1), eval(expr, {"__builtins__": {}})))
+    return out
+
+
 def qualified(c):
     parts = []
     while c is not None and c.kind != ci.CursorKind.TRANSLATION_UNIT:
@@ -183,6 +211,8 @@ def collect(build_dir):
 
         visit(tu.cursor)
     os.remove(probe)
+    for name, (header, prefix) in MACRO_ENUMS.items():
+        found[name] = macro_enum(header, prefix)
     missing = [e for e in ENUMS if e not in found]
     if missing:
         sys.exit("not found: " + ", ".join(missing))

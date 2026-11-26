@@ -269,24 +269,25 @@ void DrawSelectorFadeState(const SelectorFadeState& state, ovl_draw_list_t* draw
 ImeKbLayoutSelection ResolveInitialKbLayoutSelection(OrbisImeExtOption ext_option,
                                                      OrbisImePanelPriority panel_priority) {
     ImeKbLayoutSelection selection{};
-    const bool set_priority = True(ext_option & OrbisImeExtOption::SET_PRIORITY);
+    const bool set_priority = ((ext_option & ORBIS_IME_EXT_OPTION_SET_PRIORITY) != 0);
     if (set_priority) {
         switch (panel_priority) {
-        case OrbisImePanelPriority::Symbol:
+        case ORBIS_IME_PANEL_PRIORITY_SYMBOL:
             selection.family = ImeKbLayoutFamily::Symbols;
             break;
-        case OrbisImePanelPriority::Accent:
+        case ORBIS_IME_PANEL_PRIORITY_ACCENT:
             selection.family = ImeKbLayoutFamily::Specials;
             break;
-        case OrbisImePanelPriority::Alphabet:
-        case OrbisImePanelPriority::Default:
+        case ORBIS_IME_PANEL_PRIORITY_ALPHABET:
+        case ORBIS_IME_PANEL_PRIORITY_DEFAULT:
         default:
             selection.family = ImeKbLayoutFamily::Latin;
             break;
         }
     }
 
-    const bool shift_lock = set_priority && True(ext_option & OrbisImeExtOption::PRIORITY_SHIFT);
+    const bool shift_lock =
+        set_priority && ((ext_option & ORBIS_IME_EXT_OPTION_PRIORITY_SHIFT) != 0);
     if (shift_lock && selection.family != ImeKbLayoutFamily::Symbols) {
         // SDK docs: PRIORITY_SHIFT starts the initial panel in Shift-lock state.
         selection.case_state = ImeKbCaseState::CapsLock;
@@ -303,7 +304,7 @@ void InitializeDefaultOskSelectionAnchor(const ImeKbLayoutSelection& layout_sele
     const bool is_default_latin_lower = layout_selection.family == ImeKbLayoutFamily::Latin &&
                                         layout_selection.case_state == ImeKbCaseState::Lower;
     const bool game_requested_other =
-        True(ext_option & OrbisImeExtOption::SET_PRIORITY) && !is_default_latin_lower;
+        ((ext_option & ORBIS_IME_EXT_OPTION_SET_PRIORITY) != 0) && !is_default_latin_lower;
     if (!is_default_latin_lower || game_requested_other) {
         return;
     }

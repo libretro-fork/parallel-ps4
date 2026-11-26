@@ -451,7 +451,7 @@ struct ImeKbDrawParams {
     ImeKbLayoutSelection selection{};
     const ImeKbLayoutModel* layout_model = nullptr;
     OrbisImeLanguage supported_languages = static_cast<OrbisImeLanguage>(0);
-    OrbisImeEnterLabel enter_label = OrbisImeEnterLabel::Default;
+    OrbisImeEnterLabel enter_label = ORBIS_IME_ENTER_LABEL_DEFAULT;
     bool show_selection_highlight = true;
     bool allow_nav_input = true;
     bool use_lstick_key_nav = true;
