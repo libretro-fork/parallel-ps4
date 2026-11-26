@@ -136,10 +136,20 @@ uint64_t game_clock_now(game_clock_t* clock);
  * until it likes the result, each draw one call deeper, never ended on a time that stood
  * (Dead or Alive Xtreme 3 Fortune: its stack ran over the sound engine's objects). A
  * microsecond is the unit of the coarsest of those functions. Reads move nothing else: no
- * deadline comes sooner for them, and a frame's reads never tell a time past the frame's end,
- * so the pace is still the frames'. Never back, whichever thread asks; once a frame's reads
- * have reached its end they stand there until the next frame. */
+ * deadline comes sooner for them, so the pace is still the frames'. Never back, whichever
+ * thread asks.
+ *
+ * A frame has 16666 such microseconds, and a game that times every scope of its code reads
+ * more than that in a frame. Its reads did stand at the frame's end, and a game was then told
+ * one time for scope after scope: Shadow of the Colossus sorts its scopes by their times and
+ * nests those that lie within one another on a stack of 16, and 31 scopes of one same time
+ * nested 31 deep, over the stack and into the list beside it. So past the frame's end a read
+ * is a nanosecond on from the last, the finest step the time has: no two reads are told one
+ * time. That is at most GAME_CLOCK_READ_PAST past the end (a million reads), where they do
+ * stand; the next frame starts at the end, so the reads are ahead of the time by less than a
+ * thousandth of a second and only until the frame's first microseconds are read. */
 #define GAME_CLOCK_READ_STEP 1000u
+#define GAME_CLOCK_READ_PAST 1000000u
 uint64_t game_clock_read(game_clock_t* clock);
 
 /* The end of the frame under way */

@@ -24,12 +24,13 @@
  *     times out before the work is done; counted running from its submit until it is done
  *     (game_clock_busy, game_clock_idle), the work holds the time and the wait ends with it;
  *   - the time the game is told (game_clock_read): a microsecond on at each read while the
- *     time stands, never behind the time, never past the frame's end, standing there until
- *     the next frame, and moving no deadline; a draw seeded from the clock and drawn again
+ *     time stands, never behind the time, up to the frame's end; past it a nanosecond on at
+ *     each read (a game that reads more than a frame has microseconds is still never told
+ *     one time twice), at most GAME_CLOCK_READ_PAST past it, and moving no deadline; a draw seeded from the clock and drawn again
  *     until it differs (what Dead or Alive Xtreme 3 Fortune does, a call deeper each time)
  *     ends at its second draw, where on the standing time it never would; four threads
- *     reading while frames start are each told times that never go back, and no time twice
- *     before a frame's end. */
+ *     reading while frames start are each told times that never go back, and no time
+ *     twice. */
 
 #include <stdio.h>
 
@@ -329,7 +330,7 @@ static void reader(void* data) {
     while (!retro_atomic_load_acquire_int(&read_stop)) {
         const uint64_t end_before = game_clock_frame_end(&read_clock);
         const uint64_t t = game_clock_read(&read_clock);
-        if (t < last || t > game_clock_frame_end(&read_clock))
+        if (t < last || t > game_clock_frame_end(&read_clock) + GAME_CLOCK_READ_PAST)
             retro_atomic_fetch_add_int(&read_bad, 1);
         last = t;
         /* Kept: the times told short of a frame's end, which no two reads are told */
@@ -345,12 +346,13 @@ static void read_test(void) {
     int i, j, a, b, twice = 0;
 
     game_clock_init(c, 60, 1);
-    CHECK(game_clock_read(c) == 0, "told 0 before the first frame");
-    CHECK(game_clock_read(c) == 0, "and again: no frame, no time");
+    CHECK(game_clock_read(c) == 1, "before the first frame: a nanosecond a read");
+    CHECK(game_clock_read(c) == 2, "and again");
+    CHECK(game_clock_now(c) == 0, "no frame, no time");
     game_clock_frame(c);
     end = game_clock_frame_end(c);
     t = game_clock_read(c);
-    CHECK(t == GAME_CLOCK_READ_STEP, "the first read of a frame: a microsecond in");
+    CHECK(t == 2 + GAME_CLOCK_READ_STEP, "the first read of a frame: a microsecond on");
     CHECK(game_clock_read(c) == t + GAME_CLOCK_READ_STEP, "the next: a microsecond on");
     CHECK(game_clock_now(c) == 0, "the time itself has not moved");
     /* The game's draw ends on the time it is told, never on the time that stands */
@@ -363,12 +365,38 @@ static void read_test(void) {
     /* A frame's reads end at the frame's end and stand there */
     for (i = 0; i < 20000; i++)
         t = game_clock_read(c);
-    CHECK(t == end, "a frame's reads reach its end");
-    CHECK(game_clock_read(c) == end, "and stand there");
+    CHECK(t > end && t < end + 20000, "a frame's reads go past its end by nanoseconds");
+    CHECK(game_clock_read(c) == t + 1, "a nanosecond a read: no time told twice");
     CHECK(game_clock_now(c) == 5000000, "the time still where the game's threads left it");
+    /* What Shadow of the Colossus does with its scopes' times: each within the last nests a
+     * level deeper, on a stack of 16. Told one time for all, 31 scopes nested 31 deep. */
+    {
+        uint64_t open[64][2];
+        int depth = 0, deepest = 0;
+        for (i = 0; i < 31; i++) {
+            const uint64_t from = game_clock_read(c);
+            const uint64_t to = game_clock_read(c);
+            while (depth > 0 && !(from >= open[depth - 1][0] && to <= open[depth - 1][1]))
+                depth--;
+            open[depth][0] = from;
+            open[depth][1] = to;
+            if (++depth > deepest)
+                deepest = depth;
+        }
+        CHECK(deepest == 1, "scopes timed past a frame's end do not nest in one another");
+    }
+    t = game_clock_read(c);
     game_clock_frame(c);
-    CHECK(game_clock_read(c) == end + GAME_CLOCK_READ_STEP, "the next frame: on again");
+    CHECK(game_clock_read(c) == t + GAME_CLOCK_READ_STEP, "the next frame: microseconds again");
     CHECK(game_clock_read(c) <= game_clock_frame_end(c), "within it");
+    /* A million reads past the end, and there they stand */
+    {
+        game_clock_t far_clock;
+        game_clock_init(&far_clock, 60, 1);
+        for (i = 0; i < (int)GAME_CLOCK_READ_PAST + 10; i++)
+            t = game_clock_read(&far_clock);
+        CHECK(t == GAME_CLOCK_READ_PAST, "never more than a thousandth of a second past the end");
+    }
 
     /* Four threads reading while frames start */
     retro_atomic_int_init(&read_stop, 0);

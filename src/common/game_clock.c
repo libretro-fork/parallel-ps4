@@ -201,8 +201,12 @@ uint64_t game_clock_read(game_clock_t* clock) {
         const uint64_t now = (uint64_t)retro_atomic_load_acquire_64(&clock->now);
         const uint64_t end = (uint64_t)retro_atomic_load_acquire_64(&clock->frame_end);
         uint64_t next = (uint64_t)last + GAME_CLOCK_READ_STEP;
-        if (next > end)
-            next = end;
+        if (next > end) {
+            /* Up to the frame's end, then a nanosecond a read: still a time no read was told */
+            next = (uint64_t)last < end ? end : (uint64_t)last + 1;
+            if (next > end + GAME_CLOCK_READ_PAST)
+                next = end + GAME_CLOCK_READ_PAST;
+        }
         if (next < (uint64_t)last)
             next = (uint64_t)last; /* never back */
         if (next < now)
