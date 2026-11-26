@@ -132,7 +132,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/font/,font.cpp font_face.cpp 
 	fontft.cpp fontft_internal.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/ime/,ime.cpp ime_dialog.cpp \
 	ime_dialog_ui.cpp ime_ui.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp debug.cpp equeue.cpp \
+CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp equeue.cpp \
 	file_system.cpp kernel.cpp memory.cpp process.cpp threads.cpp time.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/coredump/,coredump.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp condvar.cpp \
@@ -223,6 +223,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/system/,msgdialog.c systemservice.c userservice.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/,np_partner.c np_party.c np_sns_facebook_dialog.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_profile_dialog/,np_profile_dialog.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/kernel/,debug.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,error_dialog.c ime_kb_layout.c ime_ui_shared.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/save_data/,save_backup.c save_instance.c \
 	save_memory.c savedata.c dialog/savedatadialog.c dialog/savedatadialog_ui.c)
