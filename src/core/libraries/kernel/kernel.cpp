@@ -448,7 +448,10 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     Libraries::Kernel::RegisterException(sym);
     Libraries::Kernel::RegisterAio(sym);
     LIB_FUNCTION("9JYNqN6jAKI", "libkernel", 1, "libkernel", sceKernelDebugOutText);
-    Libraries::Kernel::RegisterCoredump(sym);
+    LIB_FUNCTION("8zLSfEfW5AU", "libSceCoredump", 1, "libkernel",
+                 sceCoredumpRegisterCoredumpHandler);
+    LIB_FUNCTION("fFkhOgztiCA", "libSceCoredump", 1, "libkernel",
+                 sceCoredumpUnregisterCoredumpHandler);
 
     LIB_OBJ("f7uOxY9mM1U", "libkernel", 1, "libkernel", &g_stack_chk_guard);
     LIB_OBJ("+2thxYZ4syk", "libkernel", 1, "libkernel", &kernel_environ);

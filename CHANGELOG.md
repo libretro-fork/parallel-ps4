@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- libSceCoredump is MSVC C89 (kernel/coredump/coredump.c), registered in kernel.cpp, with a kernel log class in the C bridge. It still only keeps the game's handler. Not run in a game yet.
+
 - Patch Manager: patches can be a group, one option to pick one of them from, and a patch can have rates, one choice for each, its values worked out from the rate picked (common/patch_rate.c, MSVC C89: formulas such as 1/N or 0.65^(30/N), written as a float, an integer or decimal text). A patch that sets the game's frame rate makes the core run at it: the frontend's frame rate, the game's time, the console's vblanks and the sound a frame follow it, so a rate above 60 is shown at that rate. "Match display" takes the display's refresh rate. Not run in a game yet.
 - Patch Manager, Bloodborne: one Frame Rate option in place of shadPS4's ten FPS++ patches and GoldHEN's three that write the same code: 30 FPS with lower input delay, 60, 90, 120, 144, 165, 180, 240, 360, 480, 960, Match display, Uncapped (experimental), and GoldHEN's three. The 60 to 960 are one patch whose rate-dependent values are worked out from the rate, checked to write exactly what each of shadPS4's eight wrote; 144 and 165 are new. Picking one sets everything else: no VBlank Frequency to change. Not run in the game yet.
 

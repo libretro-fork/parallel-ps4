@@ -134,7 +134,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/ime/,ime.cpp ime_dialog.cpp \
 	ime_dialog_ui.cpp ime_ui.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/,aio.cpp equeue.cpp \
 	file_system.cpp kernel.cpp memory.cpp process.cpp threads.cpp time.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/coredump/,coredump.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/kernel/threads/,barrier.cpp condvar.cpp \
 	event_flag.cpp exception.cpp mutex.cpp pthread.cpp pthread_attr.cpp pthread_clean.cpp \
 	pthread_spec.cpp rwlock.cpp semaphore.cpp sleepq.cpp stack.cpp stack_asm.cpp tcb.cpp \
@@ -224,7 +223,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/np/,np_partner.c np_party.c np_
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_profile_dialog/,np_profile_dialog.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_commerce/,np_commerce.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/,trophy_ui.c)
-CORE_SOURCES_C += $(addprefix src/core/libraries/kernel/,debug.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/kernel/,debug.c coredump/coredump.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,error_dialog.c ime_kb_layout.c ime_ui_shared.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/save_data/,save_backup.c save_instance.c \
 	save_memory.c savedata.c dialog/savedatadialog.c dialog/savedatadialog_ui.c)

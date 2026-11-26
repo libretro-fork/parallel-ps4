@@ -1,27 +1,30 @@
-// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+/* libSceCoredump, in libkernel (coredump.c): a game's handler for when it crashes, kept and
+ * never called. Registered in kernel.cpp. */
+
+#ifndef SHADPS4_LIBRARIES_KERNEL_COREDUMP_H
+#define SHADPS4_LIBRARIES_KERNEL_COREDUMP_H
+
 #include "common/types.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
-
-namespace Libraries::Kernel {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef s32 PS4_SYSV_ABI (*OrbisCoredumpHandler)(void* common);
 
-struct OrbisCoredumpStopInfoCpu {
+typedef struct OrbisCoredumpStopInfoCpu {
     void* thread;
     s32 reason_code;
-};
+} OrbisCoredumpStopInfoCpu;
 
-struct OrbisCoredumpStopInfoGpu {
+typedef struct OrbisCoredumpStopInfoGpu {
     u64 timestamp;
-};
+} OrbisCoredumpStopInfoGpu;
 
-struct OrbisCoredumpThreadContextInfo {
+typedef struct OrbisCoredumpThreadContextInfo {
     u64 rdi;
     u64 rsi;
     u64 rdx;
@@ -40,8 +43,14 @@ struct OrbisCoredumpThreadContextInfo {
     u64 rip;
     u64 rflags;
     u64 rsp;
-};
+} OrbisCoredumpThreadContextInfo;
 
-void RegisterCoredump(Core::Loader::SymbolsResolver* sym);
+s32 PS4_SYSV_ABI sceCoredumpRegisterCoredumpHandler(OrbisCoredumpHandler handler, u64 stack_size,
+                                                    void* common);
+s32 PS4_SYSV_ABI sceCoredumpUnregisterCoredumpHandler(void);
 
-} // namespace Libraries::Kernel
+#ifdef __cplusplus
+}
+#endif
+
+#endif
