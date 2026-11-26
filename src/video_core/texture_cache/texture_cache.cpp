@@ -517,6 +517,27 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& image_
             cache_image.info.resources.levels == 1 && image_info.resources.layers == 1 &&
             cache_image.info.resources.layers == 1;
 
+        // A texture of another size at the address of one the CPU wrote is another texture in a
+        // reused slot of the game's texture pool, not a view of the cached one. Viewed through the
+        // old image its texels were read with the old size, which shows as blocks of colour
+        // (Shadow of the Colossus after a load, as its PC port found). An image the GPU wrote is
+        // the same case once the CPU wrote its memory again; without a CPU write it stays a view,
+        // as a target drawn by the GPU and sampled in another size is. That old image is kept,
+        // since a stale descriptor may still bind it.
+        const bool cpu_rewrote_gpu_image =
+            True(cache_image.flags & ImageFlagBits::GpuModified) &&
+            True(cache_image.flags & (ImageFlagBits::CpuDirty | ImageFlagBits::MaybeCpuDirty));
+        if (binding == BindingType::Texture &&
+            image_info.props.is_block == cache_image.info.props.is_block &&
+            (False(cache_image.flags & ImageFlagBits::GpuModified) || cpu_rewrote_gpu_image) &&
+            (image_info.size.width != cache_image.info.size.width ||
+             image_info.size.height != cache_image.info.size.height)) {
+            if (safe_to_delete && !cpu_rewrote_gpu_image) {
+                FreeImage(cache_image_id);
+            }
+            return {merged_image_id, -1, -1};
+        }
+
         // Size and resources are less than or equal, use image view.
         if (image_info.pixel_format != cache_image.info.pixel_format ||
             image_info.guest_size <= cache_image.info.guest_size || pow2_padding_only) {
