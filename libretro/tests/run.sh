@@ -469,6 +469,10 @@ build $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include 
 build $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -Isrc -I$L/include \
     libretro/tests/sample_locs_test.c src/video_core/amdgpu/sample_locs.c -o "$OUT/sample_locs_test"
 "$OUT/sample_locs_test"
+# The GPU's texture detail statistics, which a game streams its textures by
+build $CC -std=c89 -O1 -g -Wall -Wno-long-long -fsanitize=address,undefined -Isrc -I$L/include \
+    libretro/tests/lod_stats_test.c src/video_core/amdgpu/lod_stats.c -o "$OUT/lod_stats_test"
+"$OUT/lod_stats_test"
 # The frames' ten-bit format on a device, and a readback's narrowing of it to XRGB8888
 build $CC -std=c89 -O1 -g -Wall -fsanitize=address,undefined -isystem externals/vulkan-headers/include \
     libretro/tests/frame_narrow_device_test.c -o "$OUT/frame_narrow_device_test" -ldl

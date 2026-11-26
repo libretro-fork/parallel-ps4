@@ -17,6 +17,7 @@
 #include "core/memory.h"
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/amdgpu/lod_stats.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -900,7 +901,28 @@ Liverpool::Task Liverpool::ProcessGraphics(Common::Span<const u32> dcb) {
                 break;
             }
             case PM4ItOpcode::GetLodStats: {
-                LOG_WARNING(Render_Vulkan, "Unimplemented IT_GET_LOD_STATS");
+                // The texture detail statistics a game streams its textures by (lod_stats.h)
+                if (count < 3) {
+                    LOG_WARNING(Render_Vulkan, "IT_GET_LOD_STATS of %u words", count);
+                    break;
+                }
+                u64 address = 0;
+                const unsigned reports =
+                    lod_stats_packet(reinterpret_cast<const u32*>(header) + 1, &address);
+                u64 entries[LOD_STATS_BANKS];
+                lod_stats_collect(entries);
+                // Through the backing: the buffer may be on pages the GPU's tracking protects
+                Core::MemoryManager* memory = Core::Memory::Instance();
+                bool written = reports != 0;
+                for (unsigned i = 0; written && i < reports; i++) {
+                    written = memory->TryWriteBacking(
+                        reinterpret_cast<void*>(address + LOD_STATS_REPORT_OFFSET +
+                                                u64{i} * LOD_STATS_REPORT_BYTES),
+                        entries, sizeof(entries));
+                }
+                if (!written) {
+                    LOG_WARNING(Render_Vulkan, "IT_GET_LOD_STATS: no room at 0x%" PRIx64, address);
+                }
                 break;
             }
             case PM4ItOpcode::CondExec: {

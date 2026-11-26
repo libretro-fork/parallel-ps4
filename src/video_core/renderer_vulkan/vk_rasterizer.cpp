@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <retro_atomic.h>
 #include <rthreads/rthreads.h>
 #include "common/enum_names.h"
 #include "core/emulator_settings.h"
@@ -8,6 +9,7 @@
 #include "shader_recompiler/resource.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/amdgpu/lod_stats.h"
 #include "video_core/amdgpu/sample_locs.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -1127,8 +1129,15 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             } else {
                 const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
                 if (size != vsharp.GetSize()) {
-                    LOG_ERROR(Render, "Clamped size from %u to %" PRIu64 " for stage 0x%" PRIx64,
-                              vsharp.GetSize(), size, stage.pgm_hash);
+                    // Said a few times, not at every bind: a game that binds "all of memory"
+                    // does it thousands of times a frame, and each line is written at once
+                    static retro_atomic_int_t said{0};
+                    if (retro_atomic_load_relaxed_int(&said) < 16 &&
+                        retro_atomic_fetch_add_int(&said, 1) < 16) {
+                        LOG_ERROR(Render,
+                                  "Clamped size from %u to %" PRIu64 " for stage 0x%" PRIx64,
+                                  vsharp.GetSize(), size, stage.pgm_hash);
+                    }
                 }
                 VideoCore::ObtainBufferFlags flags = {};
                 if (desc.is_written) {
@@ -1177,6 +1186,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
     u32 num_images{};
     for (const Shader::ImageResource& image_desc : stage.images) {
         const AmdGpu::Image tsharp = image_desc.GetSharp(stage);
+        if (tsharp.lod_hw_cnt_en) {
+            // Counted for the game's texture streaming (IT_GET_LOD_STATS)
+            lod_stats_mark(static_cast<unsigned>(tsharp.counter_bank_id));
+        }
         const AmdGpu::DataFormat data_fmt = tsharp.GetDataFmt();
         const AmdGpu::NumberFormat num_fmt = tsharp.GetNumberFmt();
         if (tsharp.Address() == 0 || data_fmt == AmdGpu::DataFormat::FormatInvalid) {
