@@ -172,12 +172,18 @@ static void parallel_patches(int argc, char** argv) {
          * finds where FMOD's own code sets the two (the block's length, then all the blocks'
          * together) and writes 512 over the 1024: the bytes are each game's own. */
         entry = find(&cat, "Lower Audio Latency");
-        /* Bloodborne has a third: Highest Model Detail Everywhere */
-        CHECK(entry >= 0 && cat.count == (f == 0 ? 3u : 2u), "its patches");
+        /* Bloodborne has three more: the Model Detail patches */
+        CHECK(entry >= 0 && cat.count == (f == 0 ? 5u : 2u), "its patches");
         if (f == 0) {
-            const int lod = find(&cat, "Highest Model Detail Everywhere");
-            CHECK(lod >= 0 && cat.entries[lod].versions[0] == '\0',
-                  "the model detail patch, for every version");
+            static const char* const detail[] = {"Highest Model Detail Everywhere",
+                                                 "Lower Model Detail Everywhere",
+                                                 "Lowest Model Detail Everywhere"};
+            unsigned d;
+            for (d = 0; d < 3; d++) {
+                const int lod = find(&cat, detail[d]);
+                CHECK(lod >= 0 && cat.entries[lod].versions[0] == '\0',
+                      "a model detail patch, for every version");
+            }
         }
         if (entry >= 0) {
             static const unsigned char code[3][24] = {
@@ -191,7 +197,7 @@ static void parallel_patches(int argc, char** argv) {
             size_t n, first = 0;
             unsigned m;
             CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
-            CHECK(cat.metadata_count == (f == 0 ? 3u : 2u), "a metadata for each patch");
+            CHECK(cat.metadata_count == (f == 0 ? 5u : 2u), "a metadata for each patch");
             for (m = 0; m < cat.metadata_count; m++) {
                 const char* name = rxml_node_attrib(cat.metadata[m].node, "Name");
                 if (name && strcmp(name, "Lower Audio Latency") == 0) {

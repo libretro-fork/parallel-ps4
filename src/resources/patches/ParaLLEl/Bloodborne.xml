@@ -30,7 +30,7 @@
     </Metadata>
     <Metadata Title="Bloodborne"
               Name="Highest Model Detail Everywhere"
-              Note="Every model is drawn with its most detailed mesh at any distance. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row and then shifted by one offset of its own and kept within 0 to 2. It does that in five places, for the different kinds of model; shadPS4's Model LOD -2 sets the offset in one of them. This sets it to -2 in all five, so every model stays at level 0, with its full-detail textures, parts with no LodBank row among them. It costs GPU time: more triangles far away. Do not turn it on with shadPS4's Model LOD 1 or Model LOD 2. Found by the game's own code, so every version of the game that has it gets it."
+              Note="Every model is drawn with its most detailed mesh, and its full-detail textures, at any distance: the offset is -2. It costs GPU time: more triangles far away. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Turn on only one of the three Model Detail patches. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
               PatchVer="1.0"
               AppElf="eboot.bin">
         <PatchList>
@@ -39,6 +39,32 @@
             <Line Type="mask" Address="48 8B 83 70 07 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 B8 02 00 00 00" Value="B9FEFFFFFF90" Offset="7"/>
             <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 07 83 F8 02 B9 02 00 00 00" Value="B8FEFFFFFF90" Offset="0"/>
             <Line Type="mask" Address="48 8B 82 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BE 02 00 00 00" Value="B9FEFFFFFF90" Offset="7"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Lower Model Detail Everywhere"
+              Note="Every model drops one detail level sooner: the offset is 1, so a model drawn at full detail is drawn at level 1, and one at level 1 at level 2. Faster, less detail. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Turn on only one of the three Model Detail patches. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 03 83 F8 02 B9 02 00 00 00 0F 4E C8" Value="B80100000090" Offset="0"/>
+            <Line Type="mask" Address="48 8B 87 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BA 02 00 00 00" Value="B90100000090" Offset="7"/>
+            <Line Type="mask" Address="48 8B 83 70 07 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 B8 02 00 00 00" Value="B90100000090" Offset="7"/>
+            <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 07 83 F8 02 B9 02 00 00 00" Value="B80100000090" Offset="0"/>
+            <Line Type="mask" Address="48 8B 82 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BE 02 00 00 00" Value="B90100000090" Offset="7"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Lowest Model Detail Everywhere"
+              Note="Every model is drawn with its least detailed mesh at any distance: the offset is 2. The fastest, the least detail. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Turn on only one of the three Model Detail patches. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 03 83 F8 02 B9 02 00 00 00 0F 4E C8" Value="B80200000090" Offset="0"/>
+            <Line Type="mask" Address="48 8B 87 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BA 02 00 00 00" Value="B90200000090" Offset="7"/>
+            <Line Type="mask" Address="48 8B 83 70 07 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 B8 02 00 00 00" Value="B90200000090" Offset="7"/>
+            <Line Type="mask" Address="8B 05 ?? ?? ?? ?? 03 07 83 F8 02 B9 02 00 00 00" Value="B80200000090" Offset="0"/>
+            <Line Type="mask" Address="48 8B 82 08 02 00 00 8B 0D ?? ?? ?? ?? 03 08 83 F9 02 BE 02 00 00 00" Value="B90200000090" Offset="7"/>
         </PatchList>
     </Metadata>
 </Patch>

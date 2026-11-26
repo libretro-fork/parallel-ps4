@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Patch Manager, Bloodborne: shadPS4's Model LOD 2, 1 and -2 are gone from its patch file, replaced by the core's Highest, Lower and Lowest Model Detail Everywhere, which set the detail offset to -2, 1 or 2 in all five places the game picks a model's detail level, where shadPS4's changed one. Checked by applying each to the 1.09 eboot and reading the code back. Not run in the game yet.
+
 - Patch Manager: Bloodborne gets "Highest Model Detail Everywhere", one of the core's own patches. The game picks a model's detail level (0 to 2, from its LodBank distances plus an offset of the game's) in five places; shadPS4's Model LOD -2 sets the offset in one of them, this sets it to -2 in all five, so every model stays at full detail. Found by byte patterns that occur once each in the 1.09 eboot, checked by applying them to it and reading the code back. Not run in the game yet.
 
 - The trophy notification is MSVC C89 (np/trophy_ui.c): its sound, decoded and resampled once at start, and its popup, with the icons mapped where they lie or lent from the core's embedded files. The C bridge gains the embedded resources and a trophy log class. Not run in a game yet.

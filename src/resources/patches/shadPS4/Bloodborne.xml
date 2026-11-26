@@ -392,39 +392,6 @@
 			<Line Type="bytes32" Address="0x11f3eab" Value="0x00000118"/>
 		</PatchList>
     </Metadata>
-    <Metadata Title="Bloodborne" 
-              Name="Model LOD 2 (Lowest model detail)" 
-              Note="Lowest model detail, performance increase. Affects visuals, lower Model LOD." 
-              Author="Kyo, auser1337" 
-              PatchVer="1.0" 
-              AppVer="01.09" 
-              AppElf="eboot.bin">
-        <PatchList>
-            <Line Type="bytes" Address="0x0216fc09" Value="b90200000090"/>
-        </PatchList>
-    </Metadata>
-    <Metadata Title="Bloodborne" 
-              Name="Model LOD 1 (Lower model detail)" 
-              Note="Slightly lower model detail, performance increase. Affects visuals, lower Model LOD." 
-              Author="Kyo, auser1337" 
-              PatchVer="1.0" 
-              AppVer="01.09" 
-              AppElf="eboot.bin">
-        <PatchList>
-            <Line Type="bytes" Address="0x0216fc09" Value="b90100000090"/>
-        </PatchList>
-    </Metadata>
-    <Metadata Title="Bloodborne" 
-              Name="Model LOD -2 (Highest model detail)" 
-              Note="Highest model detail, performance increase. Affects visuals, Higher model LOD." 
-              Author="Kyo, auser1337" 
-              PatchVer="1.0" 
-              AppVer="01.09" 
-              AppElf="eboot.bin">
-        <PatchList>
-            <Line Type="bytes" Address="0x0216fc09" Value="b9FEFFFFFF90"/>
-        </PatchList>
-    </Metadata>
     <Metadata Title="Bloodborne" Name="Increased Graphics Heap Sizes"
 			  Author="auser1337"
 			  Note="This patch increases the graphic heap size, \nallowing more memory to be used. \nMUST BE USED WITH INCREASED DMEM. \nkeep in mind this is already in resolution patches above 1080p,\nbut some users requested it seperately. "
