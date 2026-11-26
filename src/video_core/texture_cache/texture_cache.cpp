@@ -526,10 +526,11 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& image_
         // (Shadow of the Colossus after a load, as its PC port found). An image the GPU wrote is
         // the same case once the CPU wrote its memory again; without a CPU write it stays a view,
         // as a target drawn by the GPU and sampled in another size is. That old image is kept,
-        // since a stale descriptor may still bind it.
-        const bool cpu_rewrote_gpu_image =
-            True(cache_image.flags & ImageFlagBits::GpuModified) &&
-            True(cache_image.flags & (ImageFlagBits::CpuDirty | ImageFlagBits::MaybeCpuDirty));
+        // since a stale descriptor may still bind it. Only a write the CPU made in the image's
+        // own range counts: MaybeCpuDirty is a write elsewhere in a page it shares, which leaves
+        // the image as the GPU drew it while its memory is stale.
+        const bool cpu_rewrote_gpu_image = True(cache_image.flags & ImageFlagBits::GpuModified) &&
+                                           True(cache_image.flags & ImageFlagBits::CpuDirty);
         if (binding == BindingType::Texture &&
             image_info.props.is_block == cache_image.info.props.is_block &&
             (False(cache_image.flags & ImageFlagBits::GpuModified) || cpu_rewrote_gpu_image) &&

@@ -404,6 +404,19 @@ void BufferCache::EndWriteback(int slot) {
     retro_eventcount_notify(&writebacks_ec);
 }
 
+bool BufferCache::WritebackLanding(VAddr addr, u64 size) {
+    if (retro_atomic_load_acquire_int(&writebacks_live) == 0) {
+        return false;
+    }
+    for (int i = 0; i < WRITEBACK_SLOTS; i++) {
+        Writeback& w = writebacks[i];
+        if (retro_atomic_load_acquire_int(&w.live) && w.addr < addr + size && w.end > addr) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void BufferCache::WaitWritebacksHere(VAddr addr, u64 size) {
     const VAddr end = size > ~u64{0} - addr ? ~u64{0} : addr + size;
     for (int i = 0; i < WRITEBACK_SLOTS; i++) {
@@ -555,7 +568,11 @@ void BufferCache::DownloadMemoryNow(const Buffer* arena, VAddr window, u64 size)
         }
         const u64 other_size =
             MinU64(other + ReadbackWindow, other_arena->cpu_addr + other_arena->size_bytes) - other;
-        if (!memory_tracker->IsRegionGpuModified(other, other_size)) {
+        // Not where an asynchronous read back is still to land: it was recorded earlier, and
+        // landing after this one it would put older data over what this brings and then mark
+        // the range as read back, so the game would keep the older data
+        if (!memory_tracker->IsRegionGpuModified(other, other_size) ||
+            WritebackLanding(other, other_size)) {
             continue;
         }
         if (RecordDownload(other_arena, other, other_size, pending_downloads[num])) {

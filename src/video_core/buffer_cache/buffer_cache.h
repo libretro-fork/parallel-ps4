@@ -213,6 +213,9 @@ private:
     /// other windows it has lately read (hot_windows.h)
     void DownloadMemoryNow(const Buffer* arena, VAddr window, u64 size);
 
+    /// Whether an asynchronous read back still to land overlaps [@addr, @addr + @size)
+    bool WritebackLanding(VAddr addr, u64 size);
+
     /// Writes what DownloadMemory read back through @download into the game's memory, once the
     /// GPU is done with it
     void LandDownload(VAddr arena_base, VAddr device_addr, u64 size,
