@@ -153,7 +153,6 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_handler/,np_handler.cpp
 	np_handler_trophy.cpp np_handler_tus.cpp np_handler_web_api.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_matching2/,np_matching2.cpp \
 	np_matching2_internal.cpp np_matching2_mm.cpp np_matching2_signaling.cpp)
-CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_profile_dialog/,np_profile_dialog.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_score/,np_score.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_signaling/,np_signaling.cpp \
 	np_signaling_helpers.cpp np_signaling_state.cpp np_signaling_transport.cpp)
@@ -223,6 +222,7 @@ CORE_SOURCES_C += $(addprefix src/core/file_format/,psf.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/gnmdriver/,gnmdriver.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/system/,msgdialog.c systemservice.c userservice.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/np/,np_partner.c np_party.c np_sns_facebook_dialog.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/np/np_profile_dialog/,np_profile_dialog.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,error_dialog.c ime_kb_layout.c ime_ui_shared.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/save_data/,save_backup.c save_instance.c \
 	save_memory.c savedata.c dialog/savedatadialog.c dialog/savedatadialog_ui.c)

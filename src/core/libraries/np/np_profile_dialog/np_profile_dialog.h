@@ -1,80 +1,87 @@
-// SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+/* libSceNpProfileDialog: the overlay's profile card (video_core/overlay/ovl_profile.c) shows
+ * it. The status, result and error values are CommonDialog's (system/commondialog_c.h).
+ * Registered in libs.cpp. */
 
-#include <core/libraries/system/commondialog.h>
-#include <core/libraries/system/userservice.h>
+#ifndef SHADPS4_LIBRARIES_NP_PROFILE_DIALOG_H
+#define SHADPS4_LIBRARIES_NP_PROFILE_DIALOG_H
+
 #include "common/types.h"
-#include "core/libraries/np/np_types.h"
+#include "core/libraries/np/np_types_c.h"
+#include "core/libraries/system/commondialog_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-namespace Libraries::Np::NpProfileDialog {
+/* OrbisNpProfileDialogMode */
+typedef u32 OrbisNpProfileDialogMode;
+#define ORBIS_NP_PROFILE_DIALOG_MODE_INVALID 0u
+#define ORBIS_NP_PROFILE_DIALOG_MODE_NORMAL 1u
+#define ORBIS_NP_PROFILE_DIALOG_MODE_FRIEND_REQUEST 2u
+#define ORBIS_NP_PROFILE_DIALOG_MODE_ADD_TO_BLOCK_LIST 3u
+#define ORBIS_NP_PROFILE_DIALOG_MODE_GRIEF_REPORT 4u
 
-enum class OrbisNpProfileDialogMode : u32 {
-    ORBIS_NP_PROFILE_DIALOG_MODE_INVALID = 0,
-    ORBIS_NP_PROFILE_DIALOG_MODE_NORMAL = 1,
-    ORBIS_NP_PROFILE_DIALOG_MODE_FRIEND_REQUEST = 2,
-    ORBIS_NP_PROFILE_DIALOG_MODE_ADD_TO_BLOCK_LIST = 3,
-    ORBIS_NP_PROFILE_DIALOG_MODE_GRIEF_REPORT = 4,
-};
+#define ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_INVALID 0x00000000
+#define ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_ONLINE_ID 0x00000001
+#define ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_NAME 0x00000002
+#define ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_PICTURE 0x00000004
+#define ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_ABOUT_ME 0x00000008
 
-static constexpr s32 ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_INVALID = 0x00000000;
-static constexpr s32 ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_ONLINE_ID = 0x00000001;
-static constexpr s32 ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_NAME = 0x00000002;
-static constexpr s32 ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_PICTURE = 0x00000004;
-static constexpr s32 ORBIS_NP_PROFILE_DIALOG_MENU_GRIEF_REPORT_ITEM_ABOUT_ME = 0x00000008;
-
-struct OrbisNpProfileDialogParam {
-    CommonDialog::BaseParam baseParam;
+typedef struct OrbisNpProfileDialogParam {
+    common_dialog_base_param baseParam;
     u64 size;
     OrbisNpProfileDialogMode mode;
-    OrbisUserServiceUserId userId;
-    Libraries::Np::OrbisNpOnlineId targetOnlineId;
+    s32 userId;
+    np_online_id_t targetOnlineId;
     void* userData;
     u8 reserved[32];
-};
+} OrbisNpProfileDialogParam;
 
-struct OrbisNpProfileGriefReportParam {
+typedef struct OrbisNpProfileGriefReportParam {
     s32 reportItem;
     u8 reserved[28];
-};
+} OrbisNpProfileGriefReportParam;
 
-struct OrbisNpProfileDialogParamA {
-    CommonDialog::BaseParam baseParam;
+typedef struct OrbisNpProfileDialogParamA {
+    common_dialog_base_param baseParam;
     u64 size;
     OrbisNpProfileDialogMode mode;
-    OrbisUserServiceUserId userId;
-    Libraries::Np::OrbisNpAccountId targetAccountId;
-    int : 32;
+    s32 userId;
+    np_account_id_t targetAccountId;
+    u32 padding;
     void* userData;
     union {
-        uint8_t reserved[32];
+        u8 reserved[32];
         OrbisNpProfileGriefReportParam griefReportParam;
-    };
-};
+    } u;
+} OrbisNpProfileDialogParamA;
 
-struct OrbisNpProfileDialogResult {
+typedef struct OrbisNpProfileDialogResult {
     s32 result;
-    CommonDialog::Result userAction;
+    u32 userAction; /* COMMON_DIALOG_RESULT_* */
     void* userData;
     u8 reserved[32];
-};
+} OrbisNpProfileDialogResult;
 
-Libraries::CommonDialog::Error PS4_SYSV_ABI
-sceNpProfileDialogOpen(OrbisNpProfileDialogParam* param);
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogClose();
-Libraries::CommonDialog::Error PS4_SYSV_ABI
-sceNpProfileDialogGetResult(OrbisNpProfileDialogResult* result);
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceNpProfileDialogGetStatus();
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogInitialize();
-Libraries::CommonDialog::Error PS4_SYSV_ABI
-sceNpProfileDialogOpenA(OrbisNpProfileDialogParamA* param);
-Libraries::CommonDialog::Error PS4_SYSV_ABI sceNpProfileDialogTerminate();
-Libraries::CommonDialog::Status PS4_SYSV_ABI sceNpProfileDialogUpdateStatus();
+typedef char np_profile_dialog_param_size_check[sizeof(OrbisNpProfileDialogParam) == 128 ? 1 : -1];
+typedef char
+    np_profile_dialog_param_a_size_check[sizeof(OrbisNpProfileDialogParamA) == 120 ? 1 : -1];
+typedef char np_profile_dialog_result_size_check[sizeof(OrbisNpProfileDialogResult) == 48 ? 1 : -1];
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
-} // namespace Libraries::Np::NpProfileDialog
+u32 PS4_SYSV_ABI sceNpProfileDialogOpen(OrbisNpProfileDialogParam* param);
+u32 PS4_SYSV_ABI sceNpProfileDialogClose(void);
+u32 PS4_SYSV_ABI sceNpProfileDialogGetResult(OrbisNpProfileDialogResult* result);
+u32 PS4_SYSV_ABI sceNpProfileDialogGetStatus(void);
+u32 PS4_SYSV_ABI sceNpProfileDialogInitialize(void);
+u32 PS4_SYSV_ABI sceNpProfileDialogOpenA(OrbisNpProfileDialogParamA* param);
+u32 PS4_SYSV_ABI sceNpProfileDialogTerminate(void);
+u32 PS4_SYSV_ABI sceNpProfileDialogUpdateStatus(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

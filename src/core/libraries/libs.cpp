@@ -3986,6 +3986,27 @@ static void RegisterUserService(Core::Loader::SymbolsResolver* sym) {
                  sceUserServiceGetRegisteredUserIdList);
 }
 
+static void RegisterNpProfileDialog(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("uj9Cz7Tk0cc", "libSceNpProfileDialogCompat", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogOpen);
+    LIB_FUNCTION("wkwjz0Xdo2A", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogClose);
+    LIB_FUNCTION("8rhLl1-0W-o", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogGetResult);
+    LIB_FUNCTION("3BqoiFOjSsk", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogGetStatus);
+    LIB_FUNCTION("Lg+NCE6pTwQ", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogInitialize);
+    LIB_FUNCTION("uj9Cz7Tk0cc", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogOpen);
+    LIB_FUNCTION("nrQRlLKzdwE", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogOpenA);
+    LIB_FUNCTION("0Sp9vJcB1-w", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogTerminate);
+    LIB_FUNCTION("haVZE9FgKqE", "libSceNpProfileDialog", 1, "libSceNpProfileDialog",
+                 sceNpProfileDialogUpdateStatus);
+}
+
 static void RegisterNpParty(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("3e4k2mzLkmc", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCheckCallback);
     LIB_FUNCTION("nOZRy-slBoA", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCreate);
@@ -4479,7 +4500,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNpTrophy.sprx", Libraries::Np::NpTrophy::RegisterLib},
             {"libSceNpWebApi.sprx", Libraries::Np::NpWebApi::RegisterLib},
             {"libSceNpWebApi2.sprx", Libraries::Np::NpWebApi2::RegisterLib},
-            {"libSceNpProfileDialog.sprx", Libraries::Np::NpProfileDialog::RegisterLib},
+            {"libSceNpProfileDialog.sprx", RegisterNpProfileDialog},
             {"libSceNpSnsFacebookDialog.sprx", RegisterNpSnsFacebookDialog},
             {"libSceNpAuth.sprx", Libraries::Np::NpAuth::RegisterLib},
             {"libSceNpParty.sprx", RegisterNpParty},
