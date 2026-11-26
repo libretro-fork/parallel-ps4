@@ -319,7 +319,8 @@ static const char grouped[] =
     "<Patch><TitleID><ID>CUSA00207</ID></TitleID>"
     "<Metadata Name=\"Rate\" Group=\"Frame Rate\" Choice=\"%u FPS\" "
     "Rates=\"60, 144,display,0,1001,x,90 \"><PatchList/></Metadata>"
-    "<Metadata Name=\"Uncapped\" Group=\"Frame Rate\"><PatchList/></Metadata>"
+    "<Metadata Name=\"Uncapped\" Group=\"Frame Rate\" GroupNote=\"The rate.\">"
+    "<PatchList/></Metadata>"
     "</Patch>";
 
 static void collect_rate(void *ctx, unsigned rate) {
@@ -348,6 +349,9 @@ static void groups(void) {
               cat.entries[uncapped].choice == NULL &&
               cat.entries[uncapped].rates == NULL,
           "a choice label and rates, or none");
+    CHECK(cat.entries[rate].group_note == NULL &&
+              strcmp(cat.entries[uncapped].group_note, "The rate.") == 0,
+          "a group's description, from the patch that gives it");
     rates[0] = 0;
     patch_catalog_each_rate(cat.entries[rate].rates, collect_rate, rates);
     CHECK(rates[0] == 4 && rates[1] == 60 && rates[2] == 144 && rates[3] == 0 &&

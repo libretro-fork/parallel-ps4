@@ -71,6 +71,7 @@
               Name="Frame Rate 30, Lower Input Delay"
               Group="Frame Rate"
               Choice="30 FPS, lower input delay"
+              GroupNote="The game's frame rate, in place of its 30. Each choice shows frames as soon as they are done and turns the game's frame skipping off; above 30 the game's timing (physics, animation, camera, effects, the sound engine) is fixed for the rate, and the core runs the frontend and the console's vblanks at it, so nothing else needs setting. Match display takes the display's refresh rate. A change applies at the next start of the game."
               Note="The game's own 30 frames a second, shown as soon as each is done instead of waiting for every other vblank, and without its frame skipping: the input reaches the screen sooner. shadPS4's 30 FPS++."
               Author="Kyo"
               PatchVer="1.0"

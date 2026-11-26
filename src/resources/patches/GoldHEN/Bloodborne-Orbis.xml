@@ -200,6 +200,8 @@
     </Metadata>
     <Metadata Title="Bloodborne"
               Name="Resolution Patch (720p)"
+              Group="Resolution"
+              Choice="1280x720 (GoldHEN)"
               Author="Lance McDonald (manfightdragon)"
               PatchVer="1.0"
               AppVer="01.09"

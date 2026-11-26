@@ -330,6 +330,7 @@ struct PatchGroup {
   std::string name;
   char key[32];
   std::string info;
+  bool has_note = false;
   std::vector<PatchChoice> choices;
 };
 std::vector<PatchGroup> patch_groups;
@@ -374,6 +375,12 @@ void BuildPatchGroups() {
                           id.c_str());
         group->info = "Choose one. ";
       }
+      // A group's own description, from the first patch of it that gives one; else what
+      // each patch says
+      if (entry.group_note && *entry.group_note && !group->has_note) {
+        group->info = entry.group_note;
+        group->has_note = true;
+      }
       const auto add = [&](unsigned rate) {
         // Room for "disabled" and the terminator in the frontend's list
         if (group->choices.size() + 2 >= RETRO_NUM_CORE_OPTION_VALUES_MAX) {
@@ -403,8 +410,10 @@ void BuildPatchGroups() {
       } else {
         add(kNoRate);
       }
-      group->info += PatchInfo(entry);
-      group->info += ' ';
+      if (!group->has_note) {
+        group->info += PatchInfo(entry);
+        group->info += ' ';
+      }
     }
   for (PatchGroup &g : patch_groups) {
     while (!g.info.empty() && g.info.back() == ' ') {

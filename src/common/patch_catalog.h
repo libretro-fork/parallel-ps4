@@ -56,6 +56,8 @@ typedef struct patch_catalog_entry {
     const char* group;
     const char* choice;
     const char* rates;
+    /* The description of its group's option, when it gives one */
+    const char* group_note;
     /* FrameRate="1": the rate picked is the game's frame rate, and the
      * frontend's: the core runs at it */
     int frame_rate;

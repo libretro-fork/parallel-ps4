@@ -153,6 +153,7 @@ static int patch_catalog_read(patch_catalog_t* cat, unsigned* cap, struct rxml_n
             e->group = rxml_node_attrib(node, "Group");
             e->choice = rxml_node_attrib(node, "Choice");
             e->rates = rxml_node_attrib(node, "Rates");
+            e->group_note = rxml_node_attrib(node, "GroupNote");
             {
                 const char* frame_rate = rxml_node_attrib(node, "FrameRate");
                 e->frame_rate = frame_rate && strcmp(frame_rate, "1") == 0;
