@@ -106,6 +106,8 @@ struct SharedOptions {
     /// readback first goes there, 2 as the game maps it (emu_readback_import)
     std::uint32_t readback_import;
     std::uint32_t direct_memory_access;
+    /// The game's red zone is kept from Windows (emu_settings redzone_patches)
+    std::uint32_t red_zone;
     std::uint32_t show_fps;
     std::uint32_t vertex_capture;
     std::int32_t volume;

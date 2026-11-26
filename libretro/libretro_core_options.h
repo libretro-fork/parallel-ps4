@@ -364,6 +364,23 @@ struct retro_core_option_v2_definition option_defs_us[] = {
          {NULL, NULL},
      },
      "disabled"},
+    {"shadps4_red_zone",
+     "Protect the Game's Red Zone (Windows)",
+     NULL,
+     "A PS4 game keeps values just below its stack pointer, where Windows "
+     "writes whenever it hands the emulator a memory fault: the game then "
+     "computes with what Windows left there. Enabled, the game's code is "
+     "rewritten as it is loaded so those values are out of the way. Try it "
+     "for a game with wrong or missing graphics or crashes that come and go; "
+     "takes effect when a game is started. Other systems do not need it.",
+     NULL,
+     "system",
+     {
+         {"disabled", NULL},
+         {"enabled", NULL},
+         {NULL, NULL},
+     },
+     "disabled"},
     {"shadps4_readback_linear_images",
      "Readback Linear Images",
      NULL,

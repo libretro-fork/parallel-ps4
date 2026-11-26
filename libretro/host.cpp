@@ -613,6 +613,7 @@ void ApplyCoreOptions() {
     emu_settings_set_readback_import(options.readback_import, false);
     emu_settings_set_direct_memory_access_enabled(
         options.direct_memory_access != 0, false);
+    emu_settings_set_redzone_patches(options.red_zone != 0, false);
     emu_settings_set_show_fps_counter(options.show_fps != 0, false);
     emu_settings_set_volume_slider(options.volume, false);
     emu_settings_set_console_language(options.console_language, false);

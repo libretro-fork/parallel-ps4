@@ -424,6 +424,7 @@ void ReadCoreOptions(Libretro::SharedOptions& options) {
                               : readback_import == "disabled" ? 0
                                                               : 1;
     options.direct_memory_access = enabled("shadps4_direct_memory_access", "disabled");
+    options.red_zone = enabled("shadps4_red_zone", "disabled");
     options.show_fps = enabled("shadps4_show_fps", "disabled");
     options.vertex_capture = enabled("shadps4_vertex_capture", "disabled");
     options.volume = std::clamp(std::atoi(OptionValue("shadps4_volume", "100").c_str()), 0, 500);
