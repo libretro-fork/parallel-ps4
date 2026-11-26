@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- libSceNpCommerce is MSVC C89 (np_commerce.c), registered in libs.cpp, with its own log class in the C bridge. The store's dialog and icon still go to the overlay with the same status, result and error values. Not run in a game yet.
+
 - libkernel's sceKernelDebugOutText is MSVC C89 (kernel/debug.c), registered in kernel.cpp. It still writes the text to the game's standard output. Not run in a game yet.
 
 - Texture cache: a GPU-drawn image the CPU wrote into is taken as a reused texture-pool slot only when the game has not used it for the last two frames. A live target sampled at another size stays a view of what the GPU drew, instead of being read from the game's memory, which holds none of it; that is the likeliest source of the one-frame blocks of garbage in Dead or Alive Xtreme 3 (with read backs off too). The first 16 times a slot is taken as reused are logged. Not run in a game yet.

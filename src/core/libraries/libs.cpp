@@ -4007,6 +4007,30 @@ static void RegisterNpProfileDialog(Core::Loader::SymbolsResolver* sym) {
                  sceNpProfileDialogUpdateStatus);
 }
 
+static void RegisterNpCommerce(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("NU3ckGHMFXo", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogClose);
+    LIB_FUNCTION("r42bWcQbtZY", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogGetResult);
+    LIB_FUNCTION("CCbC+lqqvF0", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogGetStatus);
+    LIB_FUNCTION("0aR2aWmQal4", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogInitialize);
+    LIB_FUNCTION("9ZiLXAGG5rg", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogInitializeInternal);
+    LIB_FUNCTION("DfSCDRA3EjY", "libSceNpCommerce", 1, "libSceNpCommerce", sceNpCommerceDialogOpen);
+    LIB_FUNCTION("m-I92Ab50W8", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogTerminate);
+    LIB_FUNCTION("LR5cwFMMCVE", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceDialogUpdateStatus);
+    LIB_FUNCTION("dsqCVsNM0Zg", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceHidePsStoreIcon);
+    LIB_FUNCTION("uKTDW8hk-ts", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceSetPsStoreIconLayout);
+    LIB_FUNCTION("DHmwsa6S8Tc", "libSceNpCommerce", 1, "libSceNpCommerce",
+                 sceNpCommerceShowPsStoreIcon);
+}
+
 static void RegisterNpParty(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("3e4k2mzLkmc", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCheckCallback);
     LIB_FUNCTION("nOZRy-slBoA", "libSceNpParty", 1, "libSceNpParty", sceNpPartyCreate);
@@ -4491,7 +4515,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceSaveDataDialog.sprx", RegisterSaveDataDialog},
             {"libSceSsl2.sprx", Libraries::Ssl2::RegisterLib},
             {"libSceSysmodule.sprx", RegisterSysmodule},
-            {"libSceNpCommerce.sprx", Libraries::Np::NpCommerce::RegisterLib},
+            {"libSceNpCommerce.sprx", RegisterNpCommerce},
             {"libSceNpCommon.sprx", Libraries::Np::NpCommon::RegisterLib},
             {"libSceNpManager.sprx", Libraries::Np::NpManager::RegisterLib},
             {"libSceNpMatching2.sprx", Libraries::Np::NpMatching2::RegisterLib},

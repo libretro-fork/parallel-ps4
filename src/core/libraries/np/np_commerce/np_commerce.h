@@ -1,62 +1,78 @@
-// SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
+ * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#pragma once
+/* libSceNpCommerce: the store's dialog and icon, which the overlay shows
+ * (video_core/overlay/ovl_commerce.c). The status and error values are CommonDialog's
+ * (system/commondialog_c.h). Registered in libs.cpp. */
+
+#ifndef SHADPS4_LIBRARIES_NP_COMMERCE_H
+#define SHADPS4_LIBRARIES_NP_COMMERCE_H
 
 #include "common/types.h"
-#include "core/libraries/system/commondialog.h"
+#include "core/libraries/system/commondialog_c.h"
 
-namespace Core::Loader {
-class SymbolsResolver;
-}
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-namespace Libraries::Np::NpCommerce {
+#define NP_COMMERCE_MAX_LABEL_LEN 128
+#define ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX 10u
 
-using CommonDialog::BaseParam;
-using CommonDialog::Error;
-using CommonDialog::Status;
-
-static constexpr u64 MAX_LABEL_LEN = 128;
-static constexpr u32 ORBIS_NP_COMMERCE_DIALOG_NUM_TARGETS_MAX = 10;
-
-struct OrbisNpCommerceDialogParam {
-    BaseParam baseParam;
+typedef struct OrbisNpCommerceDialogParam {
+    common_dialog_base_param baseParam;
     s32 size;
-    OrbisUserServiceUserId userId;
+    s32 userId;
     s32 mode;
     u32 serviceLabel;
     const char* const* targets;
     u32 numTargets;
-    s32 : 32;
+    u32 padding;
     u64 features;
     void* userData;
     u8 reserved[32];
-};
-static_assert(sizeof(OrbisNpCommerceDialogParam) == 0x80);
+} OrbisNpCommerceDialogParam;
 
-struct OrbisNpCommerceDialogResult {
+typedef char
+    np_commerce_dialog_param_size_check[sizeof(OrbisNpCommerceDialogParam) == 0x80 ? 1 : -1];
+
+typedef struct OrbisNpCommerceDialogResult {
     s32 result;
-    bool authorized;
-    char : 8;
-    short : 16;
+    u8 authorized; /* bool */
+    u8 padding[3];
     void* userData;
     u8 reserved[32];
-};
-static_assert(sizeof(OrbisNpCommerceDialogResult) == 0x30);
+} OrbisNpCommerceDialogResult;
 
-// OrbisNpCommerceDialogResult return codes
-static constexpr s32 ORBIS_COMMON_DIALOG_RESULT_OK = 0;
-static constexpr s32 ORBIS_COMMON_DIALOG_RESULT_USER_CANCELED = 1;
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_RESULT_PURCHASED = 2;
+typedef char
+    np_commerce_dialog_result_size_check[sizeof(OrbisNpCommerceDialogResult) == 0x30 ? 1 : -1];
 
-// OrbisNpCommerceDialogMode
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_MODE_CATEGORY = 0;     // Browse category mode
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_MODE_PRODUCT = 1;      // Browse product mode
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_MODE_PRODUCT_CODE = 2; // promotion code mode
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_MODE_CHECKOUT = 3;     // Checkout mode
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_MODE_DOWNLOADLIST = 4; // Download mode
-static constexpr s32 ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS = 5;         // PlayStation Plus mode
+/* OrbisNpCommerceDialogResult's result */
+#define ORBIS_NP_COMMERCE_DIALOG_RESULT_OK 0
+#define ORBIS_NP_COMMERCE_DIALOG_RESULT_USER_CANCELED 1
+#define ORBIS_NP_COMMERCE_DIALOG_RESULT_PURCHASED 2
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
+/* OrbisNpCommerceDialogMode */
+#define ORBIS_NP_COMMERCE_DIALOG_MODE_CATEGORY 0     /* browse a category */
+#define ORBIS_NP_COMMERCE_DIALOG_MODE_PRODUCT 1      /* browse a product */
+#define ORBIS_NP_COMMERCE_DIALOG_MODE_PRODUCT_CODE 2 /* a promotion code */
+#define ORBIS_NP_COMMERCE_DIALOG_MODE_CHECKOUT 3
+#define ORBIS_NP_COMMERCE_DIALOG_MODE_DOWNLOADLIST 4
+#define ORBIS_NP_COMMERCE_DIALOG_MODE_PLUS 5 /* PlayStation Plus */
 
-} // namespace Libraries::Np::NpCommerce
+s32 PS4_SYSV_ABI sceNpCommerceDialogClose(void);
+s32 PS4_SYSV_ABI sceNpCommerceDialogGetResult(OrbisNpCommerceDialogResult* result);
+s8 PS4_SYSV_ABI sceNpCommerceDialogGetStatus(void);
+s32 PS4_SYSV_ABI sceNpCommerceDialogInitialize(void);
+s32 PS4_SYSV_ABI sceNpCommerceDialogInitializeInternal(void);
+s32 PS4_SYSV_ABI sceNpCommerceDialogOpen(const OrbisNpCommerceDialogParam* param);
+s32 PS4_SYSV_ABI sceNpCommerceDialogTerminate(void);
+s32 PS4_SYSV_ABI sceNpCommerceDialogUpdateStatus(void);
+s32 PS4_SYSV_ABI sceNpCommerceHidePsStoreIcon(void);
+s32 PS4_SYSV_ABI sceNpCommerceSetPsStoreIconLayout(s32 layout);
+s32 PS4_SYSV_ABI sceNpCommerceShowPsStoreIcon(s32 pos);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

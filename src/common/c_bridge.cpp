@@ -140,6 +140,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_NpSnsFacebookDialog;
     case C_LOG_LIB_NP_PARTY:
         return Common::Log::Class::Lib_NpParty;
+    case C_LOG_LIB_NP_COMMERCE:
+        return Common::Log::Class::Lib_NpCommerce;
     case C_LOG_CORE:
         return Common::Log::Class::Core;
     case C_LOG_LOADER:
