@@ -6,6 +6,7 @@
 #include <cstring>
 #include <unordered_set>
 #include "common/assert.h"
+#include "common/gparam_patch.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -43,6 +44,80 @@ public:
 private:
     std::vector<DirEntry> entries;
     size_t index{0};
+};
+
+// A game file served from bytes the core keeps for the session (the game's graphics param
+// files changed by gparam patch lines, common/gparam_patch.h), lent, not copied: its
+// metadata is the game's file's, its size the changed one's.
+class StoredFile final : public IFile {
+public:
+    StoredFile(const u8* data, u64 size, const FileStat& stat)
+        : data{data}, size{size}, stat{stat} {
+        this->stat.size = size;
+    }
+
+    s64 Read(void* dst, u64 n) override {
+        const s64 got = ReadAt(dst, n, pos);
+        pos += static_cast<u64>(got);
+        return got;
+    }
+    s64 ReadAt(void* dst, u64 n, u64 offset) override {
+        if (offset >= size) {
+            return 0;
+        }
+        const u64 got = std::min(n, size - offset);
+        std::memcpy(dst, data + offset, got);
+        return static_cast<s64>(got);
+    }
+    s64 Write(const void*, u64) override {
+        return -1;
+    }
+    bool Seek(s64 offset, Common::FS::SeekOrigin origin) override {
+        s64 base = 0;
+        if (origin == Common::FS::SeekOrigin::CurrentPosition) {
+            base = static_cast<s64>(pos);
+        } else if (origin == Common::FS::SeekOrigin::End) {
+            base = static_cast<s64>(size);
+        }
+        if (base + offset < 0) {
+            return false;
+        }
+        pos = static_cast<u64>(base + offset);
+        return true;
+    }
+    u64 Tell() const override {
+        return pos;
+    }
+    u64 Size() const override {
+        return size;
+    }
+    bool Flush() override {
+        return true;
+    }
+    bool IsOpen() const override {
+        return true;
+    }
+    void Stat(FileStat& out) override {
+        out = stat;
+    }
+    MmapPolicy GetMmapPolicy() const override {
+        return MmapPolicy::Copy;
+    }
+    bool Map(u8* addr, u64 n, u64 offset, u32 raw_prot, const FileMapContext& ctx) override {
+        ctx.map_anonymous(addr, n);
+        const s64 got = ReadAt(addr, n, offset);
+        if (static_cast<u64>(got) < n) {
+            std::memset(addr + got, 0, n - static_cast<u64>(got));
+        }
+        ctx.protect(addr, n, raw_prot);
+        return true;
+    }
+
+private:
+    const u8* data;
+    u64 size;
+    u64 pos{0};
+    FileStat stat;
 };
 
 bool MntPoints::ignore_game_patches = false;
@@ -562,7 +637,14 @@ bool MntPoints::Stat(std::string_view guest_path, FileStat& out) {
     const auto rel = RelativeToMount(*corrected, *mount);
     for (const auto& backend : mount->backends) {
         if (backend->Exists(rel)) {
-            return backend->Stat(rel, out);
+            if (!backend->Stat(rel, out)) {
+                return false;
+            }
+            size_t stored = 0;
+            if (gparam_store_find(corrected->c_str(), &stored)) {
+                out.size = stored;
+            }
+            return true;
         }
     }
     return false;
@@ -596,7 +678,16 @@ std::unique_ptr<IFile> MntPoints::Open(std::string_view guest_path,
     // The first backend where it is a file, from one look at each
     for (const auto& backend : mount->backends) {
         if (backend->Kind(rel) == PathKind::File) {
-            return backend->Open(rel, mode);
+            auto file = backend->Open(rel, mode);
+            size_t stored_size = 0;
+            const unsigned char* const stored =
+                file && !writable ? gparam_store_find(corrected->c_str(), &stored_size) : nullptr;
+            if (stored) {
+                FileStat stat{};
+                file->Stat(stat);
+                return std::make_unique<StoredFile>(stored, stored_size, stat);
+            }
+            return file;
         }
     }
     return nullptr;

@@ -172,9 +172,9 @@ static void parallel_patches(int argc, char** argv) {
          * finds where FMOD's own code sets the two (the block's length, then all the blocks'
          * together) and writes 512 over the 1024: the bytes are each game's own. */
         entry = find(&cat, "Lower Audio Latency");
-        /* Bloodborne has six more: the Model Detail patches and the Frame Rate
-         * group's */
-        CHECK(entry >= 0 && cat.count == (f == 0 ? 8u : 2u), "its patches");
+        /* Bloodborne has seventeen more: the Model Detail group's, the Frame Rate
+         * group's and the graphics settings' (gparam lines) */
+        CHECK(entry >= 0 && cat.count == (f == 0 ? 19u : 2u), "its patches");
         if (f == 0) {
             static const char* const detail[] = {"Highest Model Detail Everywhere",
                                                  "Lower Model Detail Everywhere",
@@ -184,6 +184,20 @@ static void parallel_patches(int argc, char** argv) {
                 const int lod = find(&cat, detail[d]);
                 CHECK(lod >= 0 && cat.entries[lod].versions[0] == '\0',
                       "a model detail patch, for every version");
+                CHECK(lod >= 0 && strcmp(cat.entries[lod].group, "Model Detail") == 0,
+                      "in the Model Detail group");
+            }
+            {
+                /* A graphics setting: a group of choices for every version */
+                const int shadow = find(&cat, "Shadow Map Resolution Highest");
+                const int far = find(&cat, "Shadow Distance x2");
+                CHECK(shadow >= 0 && far >= 0, "the graphics settings");
+                if (shadow >= 0 && far >= 0) {
+                    CHECK(strcmp(cat.entries[shadow].group, "Shadow Quality") == 0 &&
+                              strcmp(cat.entries[far].group, "Shadow Distance") == 0 &&
+                              cat.entries[far].versions[0] == '\0',
+                          "in their groups, for every version");
+                }
             }
             {
               /* The Frame Rate group: the rated patch sets the frame rate, at
@@ -223,7 +237,7 @@ static void parallel_patches(int argc, char** argv) {
             size_t n, first = 0;
             unsigned m;
             CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
-            CHECK(cat.metadata_count == (f == 0 ? 8u : 2u),
+            CHECK(cat.metadata_count == (f == 0 ? 19u : 2u),
                   "a metadata for each patch");
             for (m = 0; m < cat.metadata_count; m++) {
                 const char* name = rxml_node_attrib(cat.metadata[m].node, "Name");

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,14 +15,17 @@
 
 #include "common/elf_info.h"
 #include "common/embedded_resources.h"
+#include "common/gparam_patch.h"
 #include "common/logging/log.h"
 #include "common/patch_halve.h"
 #include "common/patch_index.h"
 #include "common/patch_rate.h"
 #include "common/path_util.h"
+#include "common/singleton.h"
 #include "common/small_vector.h"
 #include "common/xml.h"
 #include "core/file_format/psf.h"
+#include "core/file_sys/fs.h"
 #include "memory_patcher.h"
 
 namespace MemoryPatcher {
@@ -34,6 +38,10 @@ char g_game_serial[32];
 static char catalog_serial[16];
 static uint32_t catalog_on[PATCH_CATALOG_WORDS];
 static uint16_t catalog_rates[PATCH_CATALOG_MAX];
+// The gparam lines of the patches switched on, applied to the game's graphics param files
+// once all patches are read (PrepareGparams)
+static gparam_rule_t gparam_rules[GPARAM_RULES_MAX];
+static unsigned gparam_rule_count;
 
 namespace {
 
@@ -195,7 +203,8 @@ static void ApplyMetadata(const Common::Xml::Node& node, const char* app_version
         const bool is_mask = strcmp(type, "mask") == 0;
         const bool is_jump = strcmp(type, "mask_jump32") == 0;
         const bool is_halve = strcmp(type, "mask_halve") == 0;
-        if (!version_matches && !is_mask && !is_jump && !is_halve) {
+        const bool is_gparam = strcmp(type, "gparam") == 0;
+        if (!version_matches && !is_mask && !is_jump && !is_halve && !is_gparam) {
             continue;
         }
         // A line for some rates only (MinRate, MaxRate): for those, and never without a rate
@@ -230,6 +239,26 @@ static void ApplyMetadata(const Common::Xml::Node& node, const char* app_version
                 patch.sizeStr = "";
                 patch.patchMask = PatchMask::None;
                 PatchMemory(patch);
+            }
+            continue;
+        }
+
+        if (is_gparam) {
+            // The core's own kind of line: a value of the game's graphics param files, changed
+            // as the game reads them (common/gparam_patch.h)
+            const char* const param = patch_line.attribute("Param").value();
+            const char* const field = patch_line.attribute("Field").value();
+            const char* const op = patch_line.attribute("Op").value();
+            const char* const value = patch_line.attribute("Value").value();
+            if (gparam_rule_count >= GPARAM_RULES_MAX) {
+                LOG_ERROR(Loader, "Patch %s: more than %d gparam lines, %s %s not applied",
+                          current_patch_name, GPARAM_RULES_MAX, param, field);
+            } else if (!gparam_rule_parse(&gparam_rules[gparam_rule_count], param, field, op,
+                                          value)) {
+                LOG_ERROR(Loader, "Patch %s: its gparam line %s / %s %s %s is not one, not applied",
+                          current_patch_name, param, field, op, value);
+            } else {
+                gparam_rule_count++;
             }
             continue;
         }
@@ -394,12 +423,81 @@ static void ApplyCatalogPatches() {
     patch_catalog_free(&cat);
 }
 
+// Where the game keeps its graphics param files (FromSoftware's game:/param/drawparam)
+static constexpr const char* GparamFolder = "/app0/param/drawparam";
+
+static bool EndsWith(const std::string& name, const char* suffix) {
+    const size_t n = strlen(suffix);
+    if (name.size() < n) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (tolower(static_cast<unsigned char>(name[name.size() - n + i])) != suffix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The gparam lines applied to each of the game's graphics param files, once, before the game
+// runs: the file layer then gives the game the changed files (MntPoints::Open)
+static void PrepareGparams() {
+    if (gparam_rule_count == 0) {
+        return;
+    }
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    auto dir = mnt->OpenDir(GparamFolder);
+    if (!dir) {
+        LOG_ERROR(Loader, "gparam patches: the game has no %s, nothing changed", GparamFolder);
+        return;
+    }
+    unsigned files = 0;
+    unsigned values = 0;
+    Core::FileSys::DirEntry entry;
+    while (dir->Next(entry)) {
+        if (entry.is_directory ||
+            (!EndsWith(entry.name, ".gparam.dcx") && !EndsWith(entry.name, ".gparambnd.dcx"))) {
+            continue;
+        }
+        char path[GPARAM_PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s", GparamFolder, entry.name.c_str());
+        const auto view = mnt->ReadFile(path);
+        if (!view) {
+            continue;
+        }
+        const auto bytes = view->Bytes();
+        // The game's compressor packs tighter than the core's: room for a larger file
+        const size_t cap = bytes.size() * 2 + 4096;
+        unsigned char* const out = static_cast<unsigned char*>(malloc(cap));
+        size_t out_len = 0;
+        const int changed = out ? gparam_patch_dcx(bytes.data(), bytes.size(), gparam_rules,
+                                                   gparam_rule_count, out, cap, &out_len)
+                                : -1;
+        if (changed <= 0) {
+            if (changed < 0) {
+                LOG_ERROR(Loader, "gparam patches: %s could not be read, left as it is", path);
+            }
+            free(out);
+            continue;
+        }
+        if (gparam_store_add(path, out, out_len)) {
+            files++;
+            values += static_cast<unsigned>(changed);
+        }
+    }
+    LOG_INFO(Loader, "gparam patches: %u values changed in %u of the game's param files", values,
+             files);
+}
+
 void OnGameLoaded() {
+    gparam_store_clear();
+    gparam_rule_count = 0;
     ApplyCatalogPatches();
     // Each repository in the patches folder, by its files.json
     const char* const patch_dir = Common::FS::GetUserPathUTF8(Common::FS::PathType::PatchesDir);
     RDIR* const dir = retro_opendir_include_hidden(patch_dir, true);
     if (!dir) {
+        PrepareGparams();
         return;
     }
     while (retro_readdir(dir)) {
@@ -427,6 +525,7 @@ void OnGameLoaded() {
         }
     }
     retro_closedir(dir);
+    PrepareGparams();
 }
 
 void PatchMemory(const patchInfo& patch) {

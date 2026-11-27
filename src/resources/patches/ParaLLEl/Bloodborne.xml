@@ -30,7 +30,10 @@
     </Metadata>
     <Metadata Title="Bloodborne"
               Name="Highest Model Detail Everywhere"
-              Note="Every model is drawn with its most detailed mesh, and its full-detail textures, at any distance: the offset is -2. It costs GPU time: more triangles far away. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Turn on only one of the three Model Detail patches. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
+              Group="Model Detail"
+              Choice="Highest everywhere"
+              GroupNote="How much detail models are drawn with. The game picks one of three detail levels for each model from its distance; each choice shifts that pick, the same way, everywhere. Found by the game's own code, so every version of the game that has it gets it."
+              Note="Every model is drawn with its most detailed mesh, and its full-detail textures, at any distance: the offset is -2. It costs GPU time: more triangles far away. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
               PatchVer="1.0"
               AppElf="eboot.bin">
         <PatchList>
@@ -43,7 +46,9 @@
     </Metadata>
     <Metadata Title="Bloodborne"
               Name="Lower Model Detail Everywhere"
-              Note="Every model drops one detail level sooner: the offset is 1, so a model drawn at full detail is drawn at level 1, and one at level 1 at level 2. Faster, less detail. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Turn on only one of the three Model Detail patches. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
+              Group="Model Detail"
+              Choice="Lower"
+              Note="Every model drops one detail level sooner: the offset is 1, so a model drawn at full detail is drawn at level 1, and one at level 1 at level 2. Faster, less detail. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
               PatchVer="1.0"
               AppElf="eboot.bin">
         <PatchList>
@@ -56,7 +61,9 @@
     </Metadata>
     <Metadata Title="Bloodborne"
               Name="Lowest Model Detail Everywhere"
-              Note="Every model is drawn with its least detailed mesh at any distance: the offset is 2. The fastest, the least detail. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Turn on only one of the three Model Detail patches. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
+              Group="Model Detail"
+              Choice="Lowest everywhere"
+              Note="Every model is drawn with its least detailed mesh at any distance: the offset is 2. The fastest, the least detail. The game has three detail levels per model, 0 (full) to 2, picked from the distances of the model's LodBank param row, then shifted by one offset of the game's own and kept within 0 to 2. It does that in five places, for the different kinds of model; this sets the offset in all five, parts with no LodBank row among them. Found by the game's own code, so every version of the game that has it gets it (the place shadPS4's Model LOD patches by Kyo and auser1337 changed is one of the five)."
               PatchVer="1.0"
               AppElf="eboot.bin">
         <PatchList>
@@ -749,6 +756,146 @@
             <Line Type="bytes" Address="0x0183BC9B" Value="E97043C603909090"/>
             <Line Type="bytes" Address="0x054A0080" Value="488D6424D04889442420C5F8112C24C5F811742410C4C17A10ADC4010000488B0553044A00C5FA10B064020000C5CA5D354BFFFFFFC5CA593547FFFFFFC5CA59F5C5CA5CEDC5D2582D3BFFFFFFC5CA58F6C5CA5EF5C5FA59C6C5F8102C24C5F810742410488B442420488D642430E97AE839FC"/>
             <Line Type="bytes" Address="0x0183E964" Value="E91717C60390909090"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Shadow Map Resolution Highest"
+              Group="Shadow Quality"
+              Choice="Highest everywhere"
+              GroupNote="Shadow detail. The game's graphics settings are kept per area, in its graphics param files (param/drawparam, one for each map and each of its lighting variants), and each area picks its own. These choices change the values in those files as the game reads them: the game's own settings, with no code changed, in every version of the game. Each choice raises a setting to a level the game itself uses in some of its areas, so nothing is asked of the engine that it does not do somewhere already. A change applies at the next start of the game."
+              Note="Every area's shadows drawn into the largest shadow map the game uses: Shadow Map Resolution 3, which most areas have; the areas set to 0 get 3 too. More GPU time and memory where it was 0, nothing elsewhere. What the steps between 0 and 3 are in pixels is not known."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="ShadowParam" Field="Shadow Map Resolution" Op="max" Value="3"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Shadow Distance x1.5"
+              Group="Shadow Distance"
+              Choice="1.5 times as far"
+              GroupNote="How far shadows are drawn. The game's graphics settings are kept per area, in its graphics param files (param/drawparam, one for each map and each of its lighting variants), and each area picks its own. These choices change the values in those files as the game reads them: the game's own settings, with no code changed, in every version of the game. Each choice raises a setting to a level the game itself uses in some of its areas, so nothing is asked of the engine that it does not do somewhere already. A change applies at the next start of the game."
+              Note="Shadows reach 1.5 times as far before they fade: the far cascades (Cascade Dist 1->2 and 2->3) and the fade (Far Fade Start, Far Fade Dist) of every area are multiplied by 1.5. The nearest cascade is left as it is, so shadows near the player keep their detail; the far ones are spread over more ground, so they are coarser. Best with Shadow Quality at Highest."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="ShadowParam" Field="Cascade Dist 1->2" Op="mul" Value="1.5"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Cascade Dist 2->3" Op="mul" Value="1.5"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Far Fade Start" Op="mul" Value="1.5"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Far Fade Dist" Op="mul" Value="1.5"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Shadow Distance x2"
+              Group="Shadow Distance"
+              Choice="2 times as far"
+              Note="Shadows reach 2 times as far before they fade: the far cascades (Cascade Dist 1->2 and 2->3) and the fade (Far Fade Start, Far Fade Dist) of every area are multiplied by 2. The nearest cascade is left as it is, so shadows near the player keep their detail; the far ones are spread over more ground, so they are coarser. Best with Shadow Quality at Highest."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="ShadowParam" Field="Cascade Dist 1->2" Op="mul" Value="2"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Cascade Dist 2->3" Op="mul" Value="2"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Far Fade Start" Op="mul" Value="2"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Far Fade Dist" Op="mul" Value="2"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Shadow Distance x3"
+              Group="Shadow Distance"
+              Choice="3 times as far"
+              Note="Shadows reach 3 times as far before they fade: the far cascades (Cascade Dist 1->2 and 2->3) and the fade (Far Fade Start, Far Fade Dist) of every area are multiplied by 3. The nearest cascade is left as it is, so shadows near the player keep their detail; the far ones are spread over more ground, so they are coarser. Best with Shadow Quality at Highest."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="ShadowParam" Field="Cascade Dist 1->2" Op="mul" Value="3"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Cascade Dist 2->3" Op="mul" Value="3"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Far Fade Start" Op="mul" Value="3"/>
+            <Line Type="gparam" Param="ShadowParam" Field="Far Fade Dist" Op="mul" Value="3"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Depth of Field Quality High"
+              Group="Depth of Field Quality"
+              Choice="High"
+              GroupNote="The quality of the depth of field blur, from Silicon Studio's Yebis, the game's post-processing. The game's graphics settings are kept per area, in its graphics param files (param/drawparam, one for each map and each of its lighting variants), and each area picks its own. These choices change the values in those files as the game reads them: the game's own settings, with no code changed, in every version of the game. Each choice raises a setting to a level the game itself uses in some of its areas, so nothing is asked of the engine that it does not do somewhere already. A change applies at the next start of the game."
+              Note="Depth of field (the blur of what is out of focus) at Yebis' DepthOfFieldQuality 8 at least, in every area: areas set lower are raised to 8, the game's areas use 1 to 12. That a higher number is a finer blur is read from its name; it is not confirmed."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="Setting Info" Field="DepthOfFieldQuality" Op="max" Value="8"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Depth of Field Quality Highest"
+              Group="Depth of Field Quality"
+              Choice="Highest"
+              Note="Depth of field (the blur of what is out of focus) at Yebis' DepthOfFieldQuality 12, the highest any of the game's areas has, in every area. That a higher number is a finer blur is read from its name; it is not confirmed."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="Setting Info" Field="DepthOfFieldQuality" Op="max" Value="12"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Bloom Quality High"
+              Group="Bloom Quality"
+              Choice="High"
+              GroupNote="The quality of the glow around bright lights (bloom and glare), from Yebis. The game's graphics settings are kept per area, in its graphics param files (param/drawparam, one for each map and each of its lighting variants), and each area picks its own. These choices change the values in those files as the game reads them: the game's own settings, with no code changed, in every version of the game. Each choice raises a setting to a level the game itself uses in some of its areas, so nothing is asked of the engine that it does not do somewhere already. A change applies at the next start of the game."
+              Note="Bloom and glare (the glow around lights) at Yebis' GlareQuality 5 at least and 8 glare levels at least, in every area: the game's areas use 1 to 7 and 3 to 16. That higher numbers are finer is read from their names; it is not confirmed."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="Setting Info" Field="GlareQuality" Op="max" Value="5"/>
+            <Line Type="gparam" Param="Bloom" Field="GlareNumLevels" Op="max" Value="8"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Bloom Quality Highest"
+              Group="Bloom Quality"
+              Choice="Highest"
+              Note="Bloom and glare (the glow around lights) at Yebis' GlareQuality 7, the highest any area has, and 8 glare levels at least, in every area. The 16 levels a few areas have are left to those. That higher numbers are finer is read from their names; it is not confirmed."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="Setting Info" Field="GlareQuality" Op="max" Value="7"/>
+            <Line Type="gparam" Param="Bloom" Field="GlareNumLevels" Op="max" Value="8"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Motion Blur Quality High"
+              Group="Motion Blur Quality"
+              Choice="High"
+              GroupNote="How finely motion blur is sampled, from Yebis. It does not turn motion blur on or off or change its strength. The game's graphics settings are kept per area, in its graphics param files (param/drawparam, one for each map and each of its lighting variants), and each area picks its own. These choices change the values in those files as the game reads them: the game's own settings, with no code changed, in every version of the game. Each choice raises a setting to a level the game itself uses in some of its areas, so nothing is asked of the engine that it does not do somewhere already. A change applies at the next start of the game."
+              Note="Motion blur with 5 samples at least and 4 passes at least (NumBaseSamples, MaxRecurrences), in every area: smoother, less banded blur. The game's areas use 3 to 7 samples and 0 to 5 passes. Where and how much the game blurs is not changed: motion blur stays on where it is on, off where it is off, and as long as it was."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="MotionBlur" Field="NumBaseSamples" Op="max" Value="5"/>
+            <Line Type="gparam" Param="MotionBlur" Field="MaxRecurrences" Op="max" Value="4"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Motion Blur Quality Highest"
+              Group="Motion Blur Quality"
+              Choice="Highest"
+              Note="Motion blur with 7 samples and 5 passes (NumBaseSamples, MaxRecurrences), the most any area has, in every area: the smoothest blur, the most GPU time. Where and how much the game blurs is not changed: motion blur stays on where it is on, off where it is off, and as long as it was."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="MotionBlur" Field="NumBaseSamples" Op="max" Value="7"/>
+            <Line Type="gparam" Param="MotionBlur" Field="MaxRecurrences" Op="max" Value="5"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
+              Name="Ambient Occlusion Full Resolution"
+              Group="Ambient Occlusion"
+              Choice="Full resolution"
+              GroupNote="Ambient occlusion detail. The game's graphics settings are kept per area, in its graphics param files (param/drawparam, one for each map and each of its lighting variants), and each area picks its own. These choices change the values in those files as the game reads them: the game's own settings, with no code changed, in every version of the game. Each choice raises a setting to a level the game itself uses in some of its areas, so nothing is asked of the engine that it does not do somewhere already. A change applies at the next start of the game."
+              Note="The ambient occlusion (the shading in corners and creases) of the areas that have EnableUpScale on (14 of the game's 93 SSAO settings), turned off, so it would be worked out at full resolution rather than scaled up. Read from the field's name only; what it does is not confirmed."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="gparam" Param="SSAO" Field="EnableUpScale" Op="set" Value="0"/>
         </PatchList>
     </Metadata>
 </Patch>

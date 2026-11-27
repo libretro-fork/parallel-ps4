@@ -4,6 +4,9 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Patch Manager: a patch line can change a value of FromSoftware's graphics param files (the gparam line: a param's field by name, set, raised to, lowered to or multiplied by a value) in place of the game's code. The files are changed once at the start of the game and the file layer gives the game the changed files (common/gparam_patch.c, MSVC C89, with libretro-common's deflate). Checked on Bloodborne's 103 drawparam files: only the values asked for change. Not run in a game yet.
+- Patch Manager, Bloodborne: graphics settings from those files, each a group: Shadow Quality, Shadow Distance (1.5, 2 or 3 times as far), Depth of Field Quality, Bloom Quality, Motion Blur Quality (finer, not more or less blur) and Ambient Occlusion. Each raises a setting to a level the game itself uses in some of its areas. The three Model Detail patches are one Model Detail option. Not run in the game yet.
+
 - Patch Manager, Bloodborne: the resolution patches are one Resolution option (shadPS4's seventeen Resolution Patches, Optimal 1080p and its eight Decoupled 1080p UI patches, which write the same code, and GoldHEN's 720p), the HD Motion Blur ones one Motion Blur Resolution option and the Light Grid ones one Light Grid option. A group can carry a description of its own (GroupNote); the Frame Rate option has one. Not run in the game yet.
 
 - Windows: a game's TLS read that the static CPU patching did not reach, which Windows raises as a privileged instruction, is patched where it is as an illegal instruction is, with the red-zone option off too. It ended Bloodborne at 60 frames a second on going back to the Hunter's Dream (a Havok worker's first run of such a function). Not run in the game yet.

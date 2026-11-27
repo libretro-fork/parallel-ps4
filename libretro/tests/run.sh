@@ -359,6 +359,12 @@ build $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address
     -Isrc -I$L/include libretro/tests/patch_rate_test.c src/common/patch_rate.c -lm \
     -o "$OUT/patch_rate_test"
 "$OUT/patch_rate_test"
+# A graphics param file's values changed as the game reads it (common/gparam_patch.h)
+build $CC -std=c89 -O1 -g -Wall -Wdeclaration-after-statement -fsanitize=address,undefined \
+    -Isrc -I$L/include libretro/tests/gparam_patch_test.c src/common/gparam_patch.c \
+    $L/encodings/encoding_deflate.c $L/encodings/encoding_crc32.c $L/features/features_cpu.c -lm \
+    -o "$OUT/gparam_patch_test"
+"$OUT/gparam_patch_test"
 # Asynchronous shader compilation: a draw is left out only of an image the game drew into the
 # frame before
 build $CC -std=c89 -pedantic -Wno-long-long -O1 -g -Wall -Wdeclaration-after-statement \
