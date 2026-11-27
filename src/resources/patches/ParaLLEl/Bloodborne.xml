@@ -387,7 +387,7 @@
               Choice="Uncapped (experimental)"
               Rates="display"
               FrameRate="1"
-              Note="No frame rate cap: the game runs as fast as it is drawn, up to the display's refresh rate, which the core runs the frontend and the console's vblanks at. Not recommended: many of the timing fixes assume a fixed rate, and vary as the rate does. shadPS4's Uncap FPS++."
+              Note="No frame rate cap: the game runs as fast as it is drawn, up to the display's refresh rate, which the core runs the frontend and the console's vblanks at. The game steps by the time each frame really took (at most 1/30 of a second, so below 30 frames a second it slows down rather than jumps), as in the Frame Rate patches. The timers Uncap FPS++ sets for 120 or 60 frames a second are set for the display's rate instead, as the Frame Rate patches set them; about a hundred of its other fixes still assume about 60, so not recommended. shadPS4's Uncap FPS++."
               Author="Lance McDonald (manfightdragon), Kyo"
               PatchVer="1.0"
               AppVer="01.09"
@@ -530,8 +530,8 @@
             <Line Type="bytes" Address="0x0486AAB4" Value="0000803F"/>
             <Line Type="bytes" Address="0x0486AABC" Value="0000803F"/>
             <Line Type="bytes" Address="0x04CC0024" Value="00002041"/>
-            <Line Type="bytes" Address="0x00F383CA" Value="8988083C"/>
-            <Line Type="bytes" Address="0x0575A908" Value="8988083C"/>
+            <Line Type="rate_f32" Address="0x00F383CA" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x0575A908" Value="1/N"/>
             <Line Type="bytes" Address="0x02418E3D" Value="F30F108364020000F30F5F4318F30F5D0512D59002F30F1145C8F30F1105A91A3403488D05AA7652039090909090"/>
             <Line Type="bytes" Address="0x01BF9D2A" Value="DA0BB603"/>
             <Line Type="bytes" Address="0x01444947" Value="BD5F3104"/>
@@ -601,9 +601,9 @@
             <Line Type="bytes" Address="0x01880E1A" Value="00007042"/>
             <Line Type="bytes" Address="0x018B254D" Value="00007042"/>
             <Line Type="bytes" Address="0x018B382D" Value="00007042"/>
-            <Line Type="bytes" Address="0x0192C405" Value="28000000"/>
+            <Line Type="rate_u32" Address="0x0192C405" Value="N/3"/>
             <Line Type="bytes" Address="0x01AB67EF" Value="00007042"/>
-            <Line Type="bytes" Address="0x01C0CA9A" Value="8988883C"/>
+            <Line Type="rate_f32" Address="0x01C0CA9A" Value="1/N"/>
             <Line Type="bytes" Address="0x01C9F889" Value="00007042"/>
             <Line Type="bytes" Address="0x01CA975A" Value="00007042"/>
             <Line Type="bytes" Address="0x01CA9892" Value="00007042"/>
@@ -669,7 +669,10 @@
             <Line Type="bytes" Address="0x047DF584" Value="0000803E"/>
             <Line Type="bytes" Address="0x04C9F358" Value="00007042"/>
             <Line Type="bytes" Address="0x04CAD7FC" Value="00007042"/>
-            <Line Type="bytes" Address="0x04CF6420" Value="CDCCCC3CCDCCCC3CCDCCCC3CCDCCCC3C"/>
+            <Line Type="rate_f32" Address="0x04CF6420" Value="3/N"/>
+            <Line Type="rate_f32" Address="0x04CF6424" Value="3/N"/>
+            <Line Type="rate_f32" Address="0x04CF6428" Value="3/N"/>
+            <Line Type="rate_f32" Address="0x04CF642C" Value="3/N"/>
             <Line Type="bytes" Address="0x04D02F10" Value="00007042"/>
             <Line Type="bytes" Address="0x04D02F14" Value="00007042"/>
             <Line Type="bytes" Address="0x04D02F18" Value="00007042"/>
@@ -679,7 +682,7 @@
             <Line Type="bytes" Address="0x04D02F78" Value="00007042"/>
             <Line Type="bytes" Address="0x04D02F7C" Value="00007042"/>
             <Line Type="bytes" Address="0x04D28418" Value="8988883C"/>
-            <Line Type="bytes" Address="0x01929676" Value="14000000"/>
+            <Line Type="rate_u32" Address="0x01929676" Value="N/6"/>
             <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x02713D76" Value="488B057BC72203C5FA10A064020000C5DA5D25D7256102E9E71F00009090909090909090"/>
             <Line Type="bytes" Address="0x05490000" Value="488B05F1044B00C5FA108064020000C5FA5D054D6389FFE9975F48FC"/>

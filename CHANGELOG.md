@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Patch Manager, Bloodborne: Uncapped Frame Rate sets the timers Uncap FPS++ fixes for 120 or 60 frames a second (seven of them) for the display's rate, with the formulas the Frame Rate patches use for them; at 120 they are Uncap FPS++'s own values. The game already steps by the time each frame took (at most 1/30 of a second) in both. Not run in the game yet.
+
 - Patch Manager: a patch line can change a value of FromSoftware's graphics param files (the gparam line: a param's field by name, set, raised to, lowered to or multiplied by a value) in place of the game's code. The files are changed once at the start of the game and the file layer gives the game the changed files (common/gparam_patch.c, MSVC C89, with libretro-common's deflate). Checked on Bloodborne's 103 drawparam files: only the values asked for change. Not run in a game yet.
 - Patch Manager, Bloodborne: graphics settings from those files, each a group: Shadow Quality, Shadow Distance (1.5, 2 or 3 times as far), Depth of Field Quality, Bloom Quality, Motion Blur Quality (finer, not more or less blur) and Ambient Occlusion. Each raises a setting to a level the game itself uses in some of its areas. The three Model Detail patches are one Model Detail option. Not run in the game yet.
 
