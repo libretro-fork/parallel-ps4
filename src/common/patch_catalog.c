@@ -154,6 +154,11 @@ static int patch_catalog_read(patch_catalog_t* cat, unsigned* cap, struct rxml_n
             e->choice = rxml_node_attrib(node, "Choice");
             e->rates = rxml_node_attrib(node, "Rates");
             e->group_note = rxml_node_attrib(node, "GroupNote");
+            e->display = rxml_node_attrib(node, "Display");
+            e->render = rxml_node_attrib(node, "Render");
+            e->game_display = rxml_node_attrib(node, "GameDisplay");
+            e->game_render = rxml_node_attrib(node, "GameRender");
+            e->match_group = rxml_node_attrib(node, "MatchGroup");
             {
                 const char* frame_rate = rxml_node_attrib(node, "FrameRate");
                 e->frame_rate = frame_rate && strcmp(frame_rate, "1") == 0;
@@ -271,4 +276,40 @@ void patch_catalog_free(patch_catalog_t* cat) {
     cat->metadata = NULL;
     cat->metadata_count = 0;
     cat->count = 0;
+}
+
+static int patch_catalog_same_size(const char* a, const char* b) {
+    return a && b && *a && strcmp(a, b) == 0;
+}
+
+int patch_catalog_match(const patch_catalog_t* cat, const char* group, int size_of,
+                        const char* size_of_group) {
+    const char* display = NULL;
+    const char* render = NULL;
+    unsigned i;
+    if (!cat || !group)
+        return -1;
+    if (size_of >= 0 && (unsigned)size_of < cat->count) {
+        display = cat->entries[size_of].display;
+        render = cat->entries[size_of].render;
+    } else if (size_of_group) {
+        for (i = 0; i < cat->count; i++) {
+            const patch_catalog_entry_t* e = &cat->entries[i];
+            if (e->group && strcmp(e->group, size_of_group) == 0 &&
+                (e->game_display || e->game_render)) {
+                display = e->game_display;
+                render = e->game_render;
+                break;
+            }
+        }
+    }
+    for (i = 0; i < cat->count; i++) {
+        const patch_catalog_entry_t* e = &cat->entries[i];
+        if (!e->group || strcmp(e->group, group) != 0)
+            continue;
+        if (patch_catalog_same_size(e->display, display) ||
+            patch_catalog_same_size(e->render, render))
+            return (int)i;
+    }
+    return -1;
 }

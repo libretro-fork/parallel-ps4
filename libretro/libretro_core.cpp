@@ -331,6 +331,10 @@ struct PatchGroup {
   char key[32];
   std::string info;
   bool has_note = false;
+  // The group whose choice can pick this one's (MatchGroup), "" when none, and
+  // the label of that choice: "Match " and its name
+  std::string match_group;
+  std::string match_label;
   std::vector<PatchChoice> choices;
 };
 std::vector<PatchGroup> patch_groups;
@@ -381,9 +385,13 @@ void BuildPatchGroups() {
         group->info = entry.group_note;
         group->has_note = true;
       }
+      if (entry.match_group && *entry.match_group && group->match_group.empty()) {
+        group->match_group = entry.match_group;
+        group->match_label = std::string("Match ") + entry.match_group;
+      }
       const auto add = [&](unsigned rate) {
-        // Room for "disabled" and the terminator in the frontend's list
-        if (group->choices.size() + 2 >= RETRO_NUM_CORE_OPTION_VALUES_MAX) {
+        // Room for "disabled", "match" and the terminator in the frontend's list
+        if (group->choices.size() + 3 >= RETRO_NUM_CORE_OPTION_VALUES_MAX) {
           return;
         }
         PatchChoice &c = group->choices.emplace_back();
@@ -419,6 +427,10 @@ void BuildPatchGroups() {
     while (!g.info.empty() && g.info.back() == ' ') {
       g.info.pop_back();
     }
+    if (!g.match_group.empty()) {
+      g.info += " " + g.match_label + ": the one made for the size " + g.match_group +
+                " is set to (Game default: the game's own), none where none is.";
+    }
   }
 }
 
@@ -445,9 +457,13 @@ void PublishCoreOptions() {
           def.info = group.info.c_str();
           def.category_key = "patches";
           def.values[0] = {"disabled", "Game default"};
+          size_t v = 1;
+          if (!group.match_group.empty()) {
+            def.values[v++] = {"match", group.match_label.c_str()};
+          }
           for (size_t c = 0; c < group.choices.size(); c++) {
-            def.values[c + 1] = {group.choices[c].value.c_str(),
-                                 group.choices[c].label.c_str()};
+            def.values[v++] = {group.choices[c].value.c_str(),
+                               group.choices[c].label.c_str()};
           }
           def.default_value = "disabled";
         }
@@ -527,9 +543,33 @@ void ReadPatchOptions(Libretro::SharedOptions& options) {
       options.patches_on[i / 32] |= 1u << (i % 32);
     }
     }
-    // A group: the patch of the choice, at its rate
+    // A group: the patch of the choice, at its rate; Match: the patch whose
+    // size is that of the other group's choice (patch_catalog_match)
+    const auto chosen = [](const PatchGroup &group) -> int {
+      const std::string value = OptionValue(group.key, "disabled");
+      for (const PatchChoice &c : group.choices) {
+        if (c.value == value) {
+          return static_cast<int>(c.entry);
+        }
+      }
+      return -1;
+    };
     for (const PatchGroup &group : patch_groups) {
       const std::string value = OptionValue(group.key, "disabled");
+      if (value == "match" && !group.match_group.empty()) {
+        int size_of = -1;
+        for (const PatchGroup &other : patch_groups) {
+          if (other.name == group.match_group) {
+            size_of = chosen(other);
+          }
+        }
+        const int entry = patch_catalog_match(&patch_catalog, group.name.c_str(), size_of,
+                                              group.match_group.c_str());
+        if (entry >= 0) {
+          options.patches_on[entry / 32] |= 1u << (entry % 32);
+        }
+        continue;
+      }
       for (const PatchChoice &c : group.choices) {
         if (c.value != value) {
           continue;

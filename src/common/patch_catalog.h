@@ -61,6 +61,17 @@ typedef struct patch_catalog_entry {
     /* FrameRate="1": the rate picked is the game's frame rate, and the
      * frontend's: the core runs at it */
     int frame_rate;
+    /* The sizes ("1920x1080") a patch is for, or NULL: Display, the size of
+     * the picture the game puts out, and Render, the size it draws at. The
+     * first patch of a group may give the group's sizes with no patch on
+     * (GameDisplay, GameRender), or another group whose choice picks its own
+     * (MatchGroup): the patch of this group with the size that group's choice
+     * has, Display for Display, Render for Render (patch_catalog_match). */
+    const char* display;
+    const char* render;
+    const char* game_display;
+    const char* game_render;
+    const char* match_group;
     /* The versions of the game it is for, ", " between them; cut short when long */
     char versions[96];
     /* Its core option's key: the same for the same patch of the same game */
@@ -92,6 +103,13 @@ void patch_catalog_free(patch_catalog_t* cat);
 
 /* The key's hash for @serial and @name, as in patch_catalog_entry_t.key */
 void patch_catalog_key(char* s, size_t len, const char* serial, const char* name);
+
+/* The patch of @group (the entries of @cat with that Group) whose Display or
+ * Render is the size @size_of (an entry; -1: the group @size_of_group has
+ * its choice at Game default, and its first GameDisplay and GameRender are
+ * taken) has: its index, -1 when none. */
+int patch_catalog_match(const patch_catalog_t* cat, const char* group, int size_of,
+                        const char* size_of_group);
 
 /* The rates in an entry's Rates list, in its order: @fn(@ctx, rate) for each,
  * a rate being a number from 1 to 1000 or 0 for "display" (the display's own

@@ -144,6 +144,51 @@ static size_t mask_hits(const unsigned char* data, size_t size, const int* patte
     return hits;
 }
 
+/* Bloodborne's Light Grid and Motion Blur Resolution groups, from shadPS4's
+ * file as the core keeps it: Match Resolution picks the patch made for the
+ * size the Resolution group's choice has */
+static void resolution_match(void) {
+    patch_catalog_source_t src;
+    size_t size = 0;
+    unsigned char* data = read_file("src/resources/patches/shadPS4/Bloodborne.xml", &size);
+    CHECK(data != NULL, "shadPS4's Bloodborne.xml");
+    if (!data)
+        return;
+    src.repository = "shadPS4";
+    src.data = data;
+    src.size = size;
+    CHECK(patch_catalog_build(&cat, &src, 1, "CUSA00207"), "built from shadPS4's file");
+    {
+        /* Match Resolution: the light grid made for the picture's size,
+         * the motion blur for the drawn size */
+        const int r1440 = find(&cat, "Resolution Patch 2560x1440 (16:9)");
+        const int ui1440 = find(&cat, "Decoupled 1080p UI (2560x1440 render res)");
+        const int r720 = find(&cat, "Resolution Patch 1280x720 (16:9)");
+        const int lg1080 = find(&cat, "1080p Light Grid (READ NOTES)");
+        const int lg1440 = find(&cat, "1440p Light Grid (READ NOTES)");
+        const int mb1080 = find(&cat, "HD Motion Blur 1080p (1920x1080)");
+        const int mb1440 = find(&cat, "HD Motion Blur 1440p (2560x1440)");
+        CHECK(r1440 >= 0 && ui1440 >= 0 && r720 >= 0 && lg1080 >= 0 && lg1440 >= 0 &&
+                  mb1080 >= 0 && mb1440 >= 0,
+              "the resolution, light grid and motion blur patches");
+        CHECK(patch_catalog_match(&cat, "Light Grid", r1440, "Resolution") == lg1440 &&
+                  patch_catalog_match(&cat, "Motion Blur Resolution", r1440,
+                                      "Resolution") == mb1440,
+              "2560x1440: the 1440p light grid and motion blur");
+        CHECK(patch_catalog_match(&cat, "Light Grid", ui1440, "Resolution") == lg1080 &&
+                  patch_catalog_match(&cat, "Motion Blur Resolution", ui1440,
+                                      "Resolution") == mb1440,
+              "2560x1440 with the interface at 1080p: a 1080p light grid");
+        CHECK(patch_catalog_match(&cat, "Light Grid", -1, "Resolution") == lg1080 &&
+                  patch_catalog_match(&cat, "Motion Blur Resolution", -1,
+                                      "Resolution") == mb1080,
+              "the game's own 1080p");
+        CHECK(patch_catalog_match(&cat, "Light Grid", r720, "Resolution") == -1,
+              "none made for 1280x720");
+    }
+    free(data);
+}
+
 /* The core's own patches (src/resources/patches/ParaLLEl), as the catalog reads them for each
  * game's serials: two entries, for every version (no AppVer). Double Sound Update Rate's line
  * finds MagicOrchestra's update time by its text and halves it, leaving the rest of the line;
@@ -438,6 +483,7 @@ int main(int argc, char** argv) {
     patch_catalog_free(&cat);
 
     parallel_patches(argc, argv);
+    resolution_match();
 
     if (failures) {
         printf("patch_catalog: %d failed\n", failures);
