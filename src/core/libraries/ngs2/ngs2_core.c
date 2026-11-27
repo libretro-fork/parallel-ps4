@@ -3489,11 +3489,15 @@ static uint32_t render_modules(ngs2_voice* v, int* sound) {
             break;
         case MODULE_USER_FX2:
             if (st->fx2_active && md->process_handler && s->host.user_fx2_process) {
-                float* pointers[NGS2_MAX_CHANNELS];
+                /* The input channels, then the output ones: the effect reads the one
+                 * and writes the other (Shadow of the Colossus reads channel 8 on, of
+                 * 8 in and 8 out). Both are the module's buffer, which it processes in
+                 * place as every module here does. */
+                float* pointers[2 * NGS2_MAX_CHANNELS];
                 ngs2_user_fx2_process_context ctx;
                 memset(&ctx, 0, sizeof(ctx));
                 for (c = 0; c < v->channels; c++)
-                    pointers[c] = dst + (size_t)c * stride;
+                    pointers[c] = pointers[v->channels + c] = dst + (size_t)c * stride;
                 ctx.channel_data = pointers;
                 ctx.common = r->fx2_common[m];
                 ctx.param = st->fx2_param;

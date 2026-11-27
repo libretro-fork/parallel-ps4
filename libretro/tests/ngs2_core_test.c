@@ -67,8 +67,13 @@ static int host_fx2_control(void *handler, ngs2_user_fx2_control_context *contex
 }
 
 static int host_fx2_process(void *handler, ngs2_user_fx2_process_context *context) {
+   uint32_t c;
    (void)handler;
-   (void)context;
+   /* Every input and output channel is there to read and write */
+   for (c = 0; c < context->input_channels + context->output_channels; c++) {
+      CHECK(context->channel_data[c] != NULL);
+      context->channel_data[c][0] = context->channel_data[c][0];
+   }
    fx2_processes++;
    return 0;
 }
