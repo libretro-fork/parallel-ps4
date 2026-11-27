@@ -72,6 +72,7 @@ struct Op {
 
 using Program = std::vector<Op>;
 
+constexpr s8 RegRdx = 2;
 constexpr s8 RegRsp = 4;
 constexpr s8 RegRsi = 6;
 constexpr s8 RegRdi = 7;
@@ -318,7 +319,7 @@ struct Machine {
 
 } // namespace
 
-void RunSrtWalker(PFN_SrtWalker walker, const u32* user_data, u32* flat_dst) {
+void RunSrtWalker(PFN_SrtWalker walker, const u32* user_data, u32* flat_dst, const u32* zeroes) {
     static run_once_t handler_once = RUN_ONCE_INIT;
     run_once(
         &handler_once,
@@ -331,6 +332,7 @@ void RunSrtWalker(PFN_SrtWalker walker, const u32* user_data, u32* flat_dst) {
     Machine machine;
     machine.gpr[RegRdi] = reinterpret_cast<u64>(user_data);
     machine.gpr[RegRsi] = reinterpret_cast<u64>(flat_dst);
+    machine.gpr[RegRdx] = reinterpret_cast<u64>(zeroes);
     machine.gpr[RegRsp] = reinterpret_cast<u64>(machine.stack.data() + machine.stack.size());
     machine.Run(program);
 }

@@ -238,9 +238,10 @@ struct Info : InfoPersistent {
         }
         if (srt_info.walker_func) {
 #if defined(__aarch64__) && defined(__linux__)
-            RunSrtWalker(srt_info.walker_func, user_data.data(), flattened_ud_buf.data());
+            RunSrtWalker(srt_info.walker_func, user_data.data(), flattened_ud_buf.data(),
+                         SrtZeroes());
 #else
-            srt_info.walker_func(user_data.data(), flattened_ud_buf.data());
+            srt_info.walker_func(user_data.data(), flattened_ud_buf.data(), SrtZeroes());
 #endif
         }
     }

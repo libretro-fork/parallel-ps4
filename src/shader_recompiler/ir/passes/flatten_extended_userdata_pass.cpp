@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <unordered_map>
@@ -53,6 +54,13 @@ static x64_code_t* SrtCode() {
 }
 
 namespace Shader {
+
+// What a walker reads a null table's values from (GuardNullTable): never written
+alignas(64) static u32 g_srt_zeroes[SrtZeroBytes / sizeof(u32)];
+
+const u32* SrtZeroes() {
+    return g_srt_zeroes;
+}
 
 // The walkers kept, by their code. The permutations of a program have the same walker, and
 // each kept a copy of its own: with the hundreds of permutations a material shader gets, the
@@ -643,6 +651,26 @@ static inline bool PushPtr(x64_code_t* c, PassInfo& pass_info, const IR::Value& 
     return true;
 }
 
+// The table @use_list's values are read from, null (a pointer the game left at 0) made the
+// zeroes (rdx: SrtZeroes()) when every read from it is at a fixed offset within them, so that
+// its values and those of tables below it read 0 with no fault, as a PS4 reads them. A table read
+// at a computed offset, or far into it, is left to the fault handler.
+static void GuardNullTable(x64_code_t* c, const PassInfo::PtrUserList& use_list) {
+    u64 end = 0;
+    for (const auto [src_off_dw, use] : use_list) {
+        if (!src_off_dw.IsImmediate()) {
+            return;
+        }
+        // A 64-bit read of a pointer at most
+        end = std::max<u64>(end, (static_cast<u64>(src_off_dw.U32()) << 2) + 8);
+    }
+    if (end > SrtZeroBytes) {
+        return;
+    }
+    x64_alu_ri(c, X64_CMP, 64, X64_RDI, 1);
+    x64_cmov_rr(c, X64_CC_B, 64, X64_RDI, X64_RDX);
+}
+
 static inline void PopPtr(x64_code_t* c) {
     x64_pop(c, X64_RDI);
 }
@@ -661,6 +689,7 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
     }
     PassInfo::PtrUserList* use_list = pass_info.GetUsesAsPointer(subtree);
     ASSERT(use_list);
+    GuardNullTable(c, *use_list);
 
     // First copy all the src data from this tree level
     // That way, all data that was contiguous in the guest SRT is also contiguous in the

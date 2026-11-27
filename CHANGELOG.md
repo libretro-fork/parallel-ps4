@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Shaders: a resource table the game leaves null (a pointer of 0, as Bloodborne's Ebrietas particle draws have) is read as zeroes by the code that gathers a shader's resources each draw, with no fault, when all its values are read at fixed offsets within 64 KiB: the walker points a null table at a zeroed area (passed to it in rdx) with a compare and a conditional move. Before, the first read faulted and the handler rewrote that read to give 0 for good, also for later draws whose table was there. The aarch64 interpreter runs the same walkers. A table read at computed offsets is left to the fault handler as before. The shader cache's version goes to 22, so cached shaders are made again once. Not run in a game yet.
+
 - Patch Manager, Bloodborne: Light Grid and Motion Blur Resolution have a Match Resolution choice: the light grid made for the size of the picture the Resolution option gives (1080p with the interface kept at 1080p), the motion blur for the size it draws at. Where no patch is made for that size (1280x720, say), none is applied. A patch group says this with MatchGroup, and patches their sizes with Display and Render. Not run in the game yet.
 
 - Patch Manager, Bloodborne: Uncapped Frame Rate sets the timers Uncap FPS++ fixes for 120 or 60 frames a second (seven of them) for the display's rate, with the formulas the Frame Rate patches use for them; at 120 they are Uncap FPS++'s own values. The game already steps by the time each frame took (at most 1/30 of a second) in both. Not run in the game yet.
