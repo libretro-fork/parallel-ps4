@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- libSceNetCtl's callback table is MSVC C89 (`network/net_ctl_obj.c`, `net_ctl_obj.h`; `net_ctl_obj.cpp` is gone), and lock-free: a slot is claimed with a compare-and-swap and published once filled, where a mutex guarded the table. `net_ctl_codes.h` is a C header. Not run in a game yet.
+
 - Dump Shaders writes the shaders the shader cache gives too: they are never compiled, so a game whose shaders were all cached dumped none (no shader/dumps folder at all). Each is dumped from the translation that checks it against the cache, at its first draw. Not run in a game yet.
 
 - libSceNgs2: a UserFx2 effect is given its output channels after its input ones (aChannelData), where it was given only the input ones. Shadow of the Colossus's effects read channel 8 on, as 8 in and 8 out; with up to 256 racks it makes them, and it crashed on start reading a null buffer (eboot+0x9a17e0, sndx_out_thread). Both are the module's buffer, processed in place as every module of the engine is. ngs2_core_test reads and writes every channel it is given. Not run in the game yet.

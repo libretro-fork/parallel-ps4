@@ -23,8 +23,6 @@
 
 namespace Libraries::NetCtl {
 
-static NetCtlInternal netctl;
-
 int PS4_SYSV_ABI sceNetBweCheckCallbackIpcInt() {
     LOG_ERROR(Lib_NetCtl, "(STUBBED) called");
     return ORBIS_OK;
@@ -382,7 +380,7 @@ int PS4_SYSV_ABI sceNetCtlRegisterCallback(OrbisNetCtlCallback func, void* arg, 
     if (!func || !cid) {
         return ORBIS_NET_CTL_ERROR_INVALID_ADDR;
     }
-    s32 result = netctl.RegisterCallback(func, arg);
+    s32 result = net_ctl_register(NET_CTL_CALLBACKS_GAME, func, arg);
     if (result < 0) {
         return result;
     } else {
@@ -471,7 +469,7 @@ int PS4_SYSV_ABI sceNetCtlRegisterCallbackForNpToolkit(OrbisNetCtlCallbackForNpT
     if (!func || !cid) {
         return ORBIS_NET_CTL_ERROR_INVALID_ADDR;
     }
-    s32 result = netctl.RegisterNpToolkitCallback(func, arg);
+    s32 result = net_ctl_register(NET_CTL_CALLBACKS_NP_TOOLKIT, func, arg);
     if (result < 0) {
         return result;
     } else {
