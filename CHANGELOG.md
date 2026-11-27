@@ -11,7 +11,7 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 - Patch Manager, Bloodborne: the resolution patches are one Resolution option (shadPS4's seventeen Resolution Patches, Optimal 1080p and its eight Decoupled 1080p UI patches, which write the same code, and GoldHEN's 720p), the HD Motion Blur ones one Motion Blur Resolution option and the Light Grid ones one Light Grid option. A group can carry a description of its own (GroupNote); the Frame Rate option has one. Not run in the game yet.
 
-- Windows: a game's TLS read that the static CPU patching did not reach, which Windows raises as a privileged instruction, is patched where it is as an illegal instruction is, with the red-zone option off too. It ended Bloodborne at 60 frames a second on going back to the Hunter's Dream (a Havok worker's first run of such a function). Not run in the game yet.
+- Windows: a game's TLS read that the static CPU patching did not reach, which Windows raises as a privileged instruction, is patched where it is as an illegal instruction is, with the red-zone option off too. It ended Bloodborne at 60 frames a second on going back to the Hunter's Dream (a Havok worker's first run of such a function). Confirmed in the game: going back to the Hunter's Dream at 60 no longer crashes.
 
 - libSceCoredump is MSVC C89 (kernel/coredump/coredump.c), registered in kernel.cpp, with a kernel log class in the C bridge. It still only keeps the game's handler. Not run in a game yet.
 
