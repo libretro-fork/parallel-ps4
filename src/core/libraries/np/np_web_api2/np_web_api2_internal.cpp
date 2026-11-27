@@ -668,7 +668,7 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
         if (result >= 0) {
             s32 http_request_id = request->GetHttpRequestId();
             s32 http_status{};
-            result = Libraries::Http2::sceHttp2GetStatusCode(http_request_id, &http_status);
+            result = sceHttp2GetStatusCode(http_request_id, &http_status);
             if (result >= 0) {
                 if (resp_info_option) {
                     resp_info_option->http_status = http_status;
@@ -762,7 +762,7 @@ s32 readData(s64 request_id, void* data, u64 size) {
     }
 
     s32 http_req_id = request->GetHttpRequestId();
-    s32 result2 = Libraries::Http2::sceHttp2ReadData(http_req_id, data, size);
+    s32 result2 = sceHttp2ReadData(http_req_id, data, size);
 
     request->SetState(0);
     result = checkRequestStatus(request, user_ctx, lib_ctx);
@@ -855,7 +855,7 @@ s32 deleteRequest(s64 request_id) {
     user_ctx->RemoveUser();
     lib_ctx->RemoveUser();
     if (http_request_id != 0) {
-        Libraries::Http2::sceHttp2DeleteRequest(http_request_id);
+        sceHttp2DeleteRequest(http_request_id);
     }
     return ORBIS_OK;
 }

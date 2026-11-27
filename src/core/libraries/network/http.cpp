@@ -31,6 +31,7 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/network/host_override.h"
 #include "core/libraries/network/http.h"
+#include "core/libraries/network/http_c.h"
 #include "http_error.h"
 
 #include <net/net_http.h>
@@ -4444,3 +4445,56 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 };
 
 } // namespace Libraries::Http
+
+// libSceHttp for C (http_c.h): libSceHttp2 (http2.c) goes through these
+extern "C" {
+int http_abort_request(int req_id) {
+    return Libraries::Http::sceHttpAbortRequest(req_id);
+}
+int http_add_request_header(int id, const char* name, const char* value, s32 mode) {
+    return Libraries::Http::sceHttpAddRequestHeader(id, name, value, mode);
+}
+int http_create_connection_with_url(int tmpl_id, const char* url, int keepalive) {
+    return Libraries::Http::sceHttpCreateConnectionWithURL(tmpl_id, url, keepalive != 0);
+}
+int http_create_request_with_url2(int conn_id, const char* method, const char* url,
+                                  u64 content_length) {
+    return Libraries::Http::sceHttpCreateRequestWithURL2(conn_id, method, url, content_length);
+}
+int http_create_template(int ctx_id, const char* user_agent, int http_ver, int auto_proxy_conf) {
+    return Libraries::Http::sceHttpCreateTemplate(ctx_id, user_agent, http_ver, auto_proxy_conf);
+}
+int http_delete_connection(int conn_id) {
+    return Libraries::Http::sceHttpDeleteConnection(conn_id);
+}
+int http_delete_request(int req_id) {
+    return Libraries::Http::sceHttpDeleteRequest(req_id);
+}
+int http_delete_template(int tmpl_id) {
+    return Libraries::Http::sceHttpDeleteTemplate(tmpl_id);
+}
+int http_get_all_response_headers(int req_id, char** header, u64* header_size) {
+    return Libraries::Http::sceHttpGetAllResponseHeaders(req_id, header, header_size);
+}
+int http_get_response_content_length(int req_id, int* result, u64* content_length) {
+    return Libraries::Http::sceHttpGetResponseContentLength(req_id, result, content_length);
+}
+int http_get_status_code(int req_id, int* status_code) {
+    return Libraries::Http::sceHttpGetStatusCode(req_id, status_code);
+}
+int http_init(int net_id, int ssl_id, u64 pool_size) {
+    return Libraries::Http::sceHttpInit(net_id, ssl_id, pool_size);
+}
+int http_read_data(int req_id, void* data, u64 size) {
+    return Libraries::Http::sceHttpReadData(req_id, data, size);
+}
+int http_send_request(int req_id, const void* data, u64 size) {
+    return Libraries::Http::sceHttpSendRequest(req_id, data, size);
+}
+int http_set_request_content_length(int req_id, u64 content_length) {
+    return Libraries::Http::sceHttpSetRequestContentLength(req_id, content_length);
+}
+int http_term(int ctx_id) {
+    return Libraries::Http::sceHttpTerm(ctx_id);
+}
+}

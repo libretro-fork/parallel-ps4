@@ -152,8 +152,7 @@ UserContext* LibraryContext::GetUserContextByUserId(OrbisUserServiceUserId user_
 }
 
 s32 PS4_SYSV_ABI internalPreSendCallback(s32 http_request_id, s32 ssl_id,
-                                         Libraries::Http2::OrbisHttp2PreSendCallbackData* data,
-                                         void* user_arg) {
+                                         OrbisHttp2PreSendCallbackData* data, void* user_arg) {
     s64 user_ctx_id = reinterpret_cast<s64>(user_arg);
     LOG_ERROR(Lib_NpWebApi2,
               "Unimplemented, http_request_id = 0x%x, ssl_id = 0x%x, user_ctx_id = 0x%" PRIx64,
@@ -179,16 +178,15 @@ s32 UserContext::Initialize() {
     this->user_agent = std::string{user_agent_buf};
 
     s32 http_ctx_id = this->parent_ctx->GetHttpCtxId();
-    http_template_id = Libraries::Http2::sceHttp2CreateTemplate(
-        http_ctx_id, user_agent_buf,
-        Libraries::Http2::OrbisHttp2HttpVersion::ORBIS_HTTP2_VERSION_2_0, 0);
+    http_template_id =
+        sceHttp2CreateTemplate(http_ctx_id, user_agent_buf, ORBIS_HTTP2_VERSION_2_0, 0);
     if (http_template_id < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to create HTTP template, error = 0x%x", http_template_id);
         return http_template_id;
     }
 
-    s32 result = Libraries::Http2::sceHttp2SetPreSendCallback(
-        http_template_id, internalPreSendCallback, reinterpret_cast<void*>(head.id));
+    s32 result = sceHttp2SetPreSendCallback(http_template_id, internalPreSendCallback,
+                                            reinterpret_cast<void*>(head.id));
     if (result < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to set pre-send callback, error = 0x%x", result);
         return result;
@@ -347,7 +345,7 @@ void UserContext::AbortAllRequests() {
 
 void UserContext::Delete() {
     if (this->http_template_id != 0) {
-        Libraries::Http2::sceHttp2DeleteTemplate(this->http_template_id);
+        sceHttp2DeleteTemplate(this->http_template_id);
         this->http_template_id = 0;
     }
     // Off its context; the caller's hold given back frees it, with its requests and callbacks
@@ -389,15 +387,15 @@ s32 Request::AddHttpRequestHeader(const char* field_name, const char* field_valu
 
 s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
     const char* method = this->method.empty() ? "UNKNOWN" : this->method.data();
-    s32 http_request_id = Libraries::Http2::sceHttp2CreateRequestWithURL(http_template_id, method,
-                                                                         url, this->content_length);
+    s32 http_request_id =
+        sceHttp2CreateRequestWithURL(http_template_id, method, url, this->content_length);
     if (http_request_id < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to create Http2 request, error = 0x%x", http_request_id);
         return http_request_id;
     }
     this->http_request_id = http_request_id;
-    s32 result = Libraries::Http2::sceHttp2AddRequestHeader(http_request_id, "Content-Type",
-                                                            this->content_type.data(), 0);
+    s32 result =
+        sceHttp2AddRequestHeader(http_request_id, "Content-Type", this->content_type.data(), 0);
     if (result < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to add Content-Type request header, error = 0x%x", result);
         return result;
@@ -411,8 +409,7 @@ s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
     const std::string bearer = NpHandler::GetInstance().GetBearerToken(user_ctx->GetUserId());
     if (!bearer.empty()) {
         const std::string auth_value = "Bearer " + bearer;
-        result = Libraries::Http2::sceHttp2AddRequestHeader(http_request_id, "Authorization",
-                                                            auth_value.data(), 0);
+        result = sceHttp2AddRequestHeader(http_request_id, "Authorization", auth_value.data(), 0);
     }
     if (bearer.empty() || result < 0) {
         LOG_WARNING(Lib_NpWebApi2, "Failed to add Authorization request header");
@@ -422,8 +419,8 @@ s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
     // As shadNet does not appear to use them, the logic is skipped for now.
 
     for (HttpRequestHeader* header : this->http_headers) {
-        s32 result = Libraries::Http2::sceHttp2AddRequestHeader(
-            http_request_id, header->field_name.data(), header->field_value.data(), 0);
+        s32 result = sceHttp2AddRequestHeader(http_request_id, header->field_name.data(),
+                                              header->field_value.data(), 0);
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2,
                       "Failed to add request header, name = %s, value = %s, error = 0x%x",
@@ -441,15 +438,14 @@ s32 Request::SendHttpRequest(void* data, u64 data_size) {
     if (this->content_length != 0 && this->sent_data == 0) {
         // Real library seems to do some calculations, some parts including IPC calls.
         // Not entirely sure how accurate this is in practice.
-        result = Libraries::Http2::sceHttp2SetRequestContentLength(this->http_request_id,
-                                                                   this->content_length);
+        result = sceHttp2SetRequestContentLength(this->http_request_id, this->content_length);
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2, "Failed to set content length, error = 0x%x", result);
             return result;
         }
     }
     if (!data || data_size == 0 || this->content_length == 0) {
-        result = Libraries::Http2::sceHttp2SendRequest(this->http_request_id, nullptr, 0);
+        result = sceHttp2SendRequest(this->http_request_id, nullptr, 0);
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2, "Failed to send request, error = 0x%x", result);
             return result;
@@ -461,7 +457,7 @@ s32 Request::SendHttpRequest(void* data, u64 data_size) {
         // Nothing left to send
         return result;
     }
-    result = Libraries::Http2::sceHttp2SendRequest(this->http_request_id, data, actual_size);
+    result = sceHttp2SendRequest(this->http_request_id, data, actual_size);
     if (result < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to send request, error = 0x%x", result);
         return result;
@@ -473,8 +469,7 @@ s32 Request::SendHttpRequest(void* data, u64 data_size) {
 s32 Request::GetAllHttpResponseHeaders() {
     char* header = nullptr;
     u64 size = 0;
-    s32 result =
-        Libraries::Http2::sceHttp2GetAllResponseHeaders(this->http_request_id, &header, &size);
+    s32 result = sceHttp2GetAllResponseHeaders(this->http_request_id, &header, &size);
     if (result < 0) {
         LOG_ERROR(Lib_NpWebApi2, "Failed to get response headers, error = 0x%x", result);
         return result;
@@ -517,7 +512,7 @@ s32 Request::Abort() {
     // state: one of the two sees the other (both full barriers)
     if (retro_atomic_load_seq_cst_int(&send_state) == 3) {
         // In the middle of an Http request, that needs aborting.
-        result = Libraries::Http2::sceHttp2AbortRequest(this->http_request_id);
+        result = sceHttp2AbortRequest(this->http_request_id);
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2, "Failed to abort http request, error = 0x%x", result);
         }
@@ -531,7 +526,7 @@ Request::~Request() {
     }
     this->http_headers.clear();
     if (this->http_request_id != 0) {
-        Libraries::Http2::sceHttp2DeleteRequest(this->http_request_id);
+        sceHttp2DeleteRequest(this->http_request_id);
     }
 }
 

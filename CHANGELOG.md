@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- libSceHttp2 is MSVC C89 (`network/http2.c`, `http2.h`; `http2.cpp` is gone). It goes through libSceHttp by `http_c.h`, sixteen forwarders in `http.cpp`. The connection each request made with a URL has is kept in a fixed table, claimed with a compare-and-swap and taken back with another, where a mutex guarded a std::map; its registration is in `libs.cpp`. Not run in a game yet.
+
 - libSceNetCtl's callback table is MSVC C89 (`network/net_ctl_obj.c`, `net_ctl_obj.h`; `net_ctl_obj.cpp` is gone), and lock-free: a slot is claimed with a compare-and-swap and published once filled, where a mutex guarded the table. `net_ctl_codes.h` is a C header. Not run in a game yet.
 
 - Dump Shaders writes the shaders the shader cache gives too: they are never compiled, so a game whose shaders were all cached dumped none (no shader/dumps folder at all). Each is dumped from the translation that checks it against the cache, at its first draw. Not run in a game yet.
