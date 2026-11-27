@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Dump Shaders writes the shaders the shader cache gives too: they are never compiled, so a game whose shaders were all cached dumped none (no shader/dumps folder at all). Each is dumped from the translation that checks it against the cache, at its first draw. Not run in a game yet.
+
 - libSceNgs2: a UserFx2 effect is given its output channels after its input ones (aChannelData), where it was given only the input ones. Shadow of the Colossus's effects read channel 8 on, as 8 in and 8 out; with up to 256 racks it makes them, and it crashed on start reading a null buffer (eboot+0x9a17e0, sndx_out_thread). Both are the module's buffer, processed in place as every module of the engine is. ngs2_core_test reads and writes every channel it is given. Not run in the game yet.
 
 - Shaders: a resource table the game leaves null (a pointer of 0, as Bloodborne's Ebrietas particle draws have) is read as zeroes by the code that gathers a shader's resources each draw, with no fault, when all its values are read at fixed offsets within 64 KiB: the walker points a null table at a zeroed area (passed to it in rdx) with a compare and a conditional move. Before, the first read faulted and the handler rewrote that read to give 0 for good, also for later draws whose table was there. The aarch64 interpreter runs the same walkers. A table read at computed offsets is left to the fault handler as before. The shader cache's version goes to 22, so cached shaders are made again once. Not run in a game yet.

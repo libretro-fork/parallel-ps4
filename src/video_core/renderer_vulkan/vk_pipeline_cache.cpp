@@ -1320,6 +1320,12 @@ void PipelineCache::RunJobOn(CompileJob& job, const Shader::ShaderParams& params
         const Common::Span<const u32> spv =
             Shader::Backend::SPIRV::EmitSPIRV(pools.spv, profile, runtime, ir_program, binding);
         job.fresh.snapshot = nullptr;
+        // A shader the cache gave is never compiled: dumped here, from this translation, so a
+        // dump has every shader the game draws with, the cached ones too
+        if (job.perm_idx == 0) {
+            DumpShader(params.code, job.hash, job.hw_stage, 0, "bin");
+        }
+        DumpShader(spv, job.hash, job.hw_stage, job.perm_idx, "spv");
         char kept_name[40];
         snprintf(kept_name, sizeof(kept_name), "0x%016" PRIx64 "_%zu", job.hash, job.perm_idx);
         const Common::Span<const u8> kept_spv =
