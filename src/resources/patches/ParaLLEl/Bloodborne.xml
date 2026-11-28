@@ -148,7 +148,7 @@
               Choice="%u FPS"
               Rates="60,90,120,144,165,180,240,360,480,960,display"
               FrameRate="1"
-              Note="The game at a steady frame rate above its 30: frames shown as soon as each is done, its frame skipping off, and the game's timing (physics, animation, camera, effects, the sound engine's update) fixed for the rate. Match display takes the display's own refresh rate. The core runs the frontend and the console's vblanks at the rate, so there is nothing else to set. shadPS4's 60 to 960 FPS++, made one patch: the values that change with the rate are worked out from it, which gives rates they did not have, such as 144 and 165, exactly as theirs at the rates they had."
+              Note="The game at a steady frame rate above its 30: frames shown as soon as each is done, its frame skipping off, and the game's timing (physics, animation, camera, effects, the sound engine's update) fixed for the rate. Match display takes the display's own refresh rate. The core runs the frontend and the console's vblanks at the rate, so there is nothing else to set. shadPS4's 60 to 960 FPS++, made one patch: the values that change with the rate are worked out from it, which gives rates they did not have, such as 144 and 165, exactly as theirs at the rates they had. Beyond theirs, five things the game ties to a 30 FPS frame follow the rate too: a subsystem the game steps by a fixed 1/30 s each frame (by the frame's time now, as the world is), the cloth's stiffness (it is solved once more each frame, so it was pulled harder the higher the rate; now as hard per second as at 30), the shortest fade of effects and two other one-frame times (a frame at the rate, not 1/60 or 1/30), a per-frame budget (one frame's share), and how fast the stick turns the model in the character creator."
               Author="Kyo"
               PatchVer="1.0"
               AppVer="01.09"
@@ -221,9 +221,20 @@
             <Line Type="rate_f32" Address="0x025df519" Value="1/(2*N)"/>
             <Line Type="bytes" Address="0x04BEFDCC" Value="8988883C"/>
             <Line Type="bytes" Address="0x04C9F358" Value="00007042"/>
-            <Line Type="bytes" Address="0x04CAD65C" Value="8988883C"/>
-            <Line Type="bytes" Address="0x04CAD660" Value="8988883C"/>
-            <Line Type="bytes" Address="0x04CAD664" Value="8988883C"/>
+            <Line Type="rate_f32" Address="0x04CAD65C" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CAD660" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CAD664" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CADC08" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CADD28" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04C88688" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04B693F0" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB63E4" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB8474" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB91C0" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB98B8" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04D28DFC" Value="45/N"/>
+            <Line Type="bytes" Address="0x01972A7D" Value="E97ED5B4036690"/>
+            <Line Type="bytes" Address="0x054C0000" Value="8B0502A929008945D0E9762A4BFC"/>
             <Line Type="bytes" Address="0x04CCC3F4" Value="8988883C"/>
             <Line Type="rate_f32" Address="0x04cf6420" Value="3/N"/>
             <Line Type="rate_f32" Address="0x04cf6424" Value="3/N"/>
@@ -403,7 +414,7 @@
               Choice="Uncapped (experimental)"
               Rates="display"
               FrameRate="1"
-              Note="No frame rate cap: the game runs as fast as it is drawn, up to the display's refresh rate, which the core runs the frontend and the console's vblanks at. The game steps by the time each frame really took (at most 1/30 of a second, so below 30 frames a second it slows down rather than jumps), as in the Frame Rate patches. The timers Uncap FPS++ sets for 120 or 60 frames a second are set for the display's rate instead, as the Frame Rate patches set them; about a hundred of its other fixes still assume about 60, so not recommended. shadPS4's Uncap FPS++."
+              Note="No frame rate cap: the game runs as fast as it is drawn, up to the display's refresh rate, which the core runs the frontend and the console's vblanks at. The game steps by the time each frame really took (at most 1/30 of a second, so below 30 frames a second it slows down rather than jumps), as in the Frame Rate patches. The timers Uncap FPS++ sets for 120 or 60 frames a second are set for the display's rate instead, as the Frame Rate patches set them; the same five things the Frame Rate patches add follow the display's rate as well (the fixed subsystem step by each frame's real time); about sixty of its other values are still those of 60 frames a second, so not recommended. shadPS4's Uncap FPS++."
               Author="Lance McDonald (manfightdragon), Kyo"
               PatchVer="1.0"
               AppVer="01.09"
@@ -436,16 +447,16 @@
             <Line Type="bytes" Address="0x02418E39" Value="8988883C"/>
             <Line Type="bytes" Address="0x02434883" Value="8988883C"/>
             <Line Type="bytes" Address="0x025B3271" Value="4831F6"/>
-            <Line Type="bytes" Address="0x04B693F0" Value="0000003F"/>
-            <Line Type="bytes" Address="0x04BB63E4" Value="0000003F"/>
-            <Line Type="bytes" Address="0x04BB8474" Value="0000003F"/>
-            <Line Type="bytes" Address="0x04BB91C0" Value="0000003F"/>
-            <Line Type="bytes" Address="0x04BB98B8" Value="0000003F"/>
+            <Line Type="rate_f32" Address="0x04B693F0" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB63E4" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB8474" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB91C0" Value="30/N"/>
+            <Line Type="rate_f32" Address="0x04BB98B8" Value="30/N"/>
             <Line Type="bytes" Address="0x02434863" Value="48B90000000000000000"/>
             <Line Type="bytes" Address="0x02434887" Value="48B90000000000000000"/>
-            <Line Type="bytes" Address="0x04CAD65C" Value="8988883C"/>
-            <Line Type="bytes" Address="0x04CAD660" Value="8988883C"/>
-            <Line Type="bytes" Address="0x04CAD664" Value="8988883C"/>
+            <Line Type="rate_f32" Address="0x04CAD65C" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CAD660" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CAD664" Value="1/N"/>
             <Line Type="bytes" Address="0x04CAF1C0" Value="8988083D"/>
             <Line Type="bytes" Address="0x04D2577C" Value="8988083D"/>
             <Line Type="bytes" Address="0x04D25E94" Value="8988083D"/>
@@ -463,7 +474,9 @@
             <Line Type="bytes" Address="0x02434FB0" Value="89F8FFFF"/>
             <Line Type="bytes" Address="0x02434FB4" Value="89F8FFFF"/>
             <Line Type="bytes" Address="0x02434FB8" Value="89F8FFFF"/>
-            <Line Type="bytes" Address="0x01972A7D" Value="C745D08988083D"/>
+            <Line Type="bytes" Address="0x01972A7D" Value="E97ED5B4036690"/>
+            <Line Type="bytes" Address="0x054C0000" Value="8B0502A929008945D0E9762A4BFC"/>
+            <Line Type="rate_f32" Address="0x04D28DFC" Value="45/N"/>
             <Line Type="bytes32" Address="0x02434806" Value="0x00516348"/>
             <Line Type="bytes" Address="0x00FBC40F" Value="EB1D"/>
             <Line Type="bytes" Address="0x013D2E16" Value="EB19"/>
@@ -739,11 +752,11 @@
             <Line Type="bytes" Address="0x0183AE75" Value="E9A656C50390909090"/>
             <Line Type="bytes" Address="0x054905B0" Value="488D6424C04889442430C5F8116C2400C5F811742410C5F8117C2420C5FA102D945889FF488B051DFF4A00C5FA10B064020000C5CA5D35795D89FFC5CA5935395D89FFC5FA103D1D5D89FFC5C25CFEC5C259FDC5CA59F5C5CA58F6C5FA102D055D89FFC5D258EDC5D25CEFC5CA5EEDC5F259CDC5F8106C2400C5F810742410C5F8107C2420488B442430488D642440E950A93AFC"/>
             <Line Type="bytes" Address="0x0183AF8C" Value="E91F56C503909090"/>
-            <Line Type="bytes" Address="0x04C88688" Value="8988083D"/>
+            <Line Type="rate_f32" Address="0x04C88688" Value="1/N"/>
             <Line Type="bytes" Address="0x04BEFDCC" Value="8988083D"/>
             <Line Type="bytes" Address="0x04CCC3F4" Value="8988083D"/>
-            <Line Type="bytes" Address="0x04CADC08" Value="8988083D"/>
-            <Line Type="bytes" Address="0x04CADD28" Value="8988083D"/>
+            <Line Type="rate_f32" Address="0x04CADC08" Value="1/N"/>
+            <Line Type="rate_f32" Address="0x04CADD28" Value="1/N"/>
             <Line Type="bytes" Address="0x04D25E68" Value="CDCCCC3D"/>
             <Line Type="bytes" Address="0x05490700" Value="50488B05F0FD4A00C5FA10886402000058C5F25D0D4B5C89FFC5F2590D0B5C89FFC5F2590DAB7889FFC5FA58C9E9CB7D87FC"/>
             <Line Type="bytes" Address="0x01D084F5" Value="E906827803909090"/>
