@@ -790,6 +790,22 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         frame_extent = info.size;
     }
 
+    // The same question as one already answered by an exact match, with no image registered
+    // or unregistered since, has the same answer
+    const size_t memo_slot =
+        ((info.guest_address >> 8) ^ (info.guest_address >> 20) ^ info.guest_size) &
+        (FIND_MEMO_SIZE - 1);
+    FindMemo& memo = find_memo[memo_slot];
+    if (memo.generation == image_generation && memo.guest_address == info.guest_address &&
+        memo.guest_size == info.guest_size && memo.size == info.size &&
+        memo.pixel_format == info.pixel_format && memo.type == info.type &&
+        memo.resources == info.resources && memo.exact_fmt == exact_fmt) {
+        Image& image = slot_images[memo.image_id];
+        image.tick_accessed_last = scheduler.CurrentTick();
+        TouchImage(image);
+        return memo.image_id;
+    }
+
     Common::SmallVector<ImageId, 8> image_ids;
     ForEachImageInRegion(info.guest_address, info.guest_size,
                          [&](ImageId image_id, Image& image) { image_ids.push_back(image_id); });
@@ -817,6 +833,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         }
         image_id = cache_id;
     }
+    const ImageId exact_id = image_id;
 
     // Try to resolve overlaps (if any)
     int view_mip{-1};
@@ -867,6 +884,20 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         image_id =
             slot_images.Insert(instance, runtime, slot_image_views, info, scale_num, scale_den);
         RegisterImage(image_id);
+    }
+
+    if (exact_id && image_id == exact_id) {
+        memo = FindMemo{
+            .guest_address = info.guest_address,
+            .guest_size = info.guest_size,
+            .size = info.size,
+            .pixel_format = info.pixel_format,
+            .type = info.type,
+            .resources = info.resources,
+            .exact_fmt = exact_fmt,
+            .generation = image_generation,
+            .image_id = image_id,
+        };
     }
 
     Image& image = slot_images[image_id];
@@ -1166,6 +1197,7 @@ VkSampler TextureCache::GetSampler(const AmdGpu::Sampler& sharp,
 }
 
 void TextureCache::RegisterImage(ImageId image_id) {
+    ++image_generation;
     Image& image = slot_images[image_id];
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
@@ -1185,6 +1217,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
+    ++image_generation;
     Image& image = slot_images[image_id];
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already unregistered image");

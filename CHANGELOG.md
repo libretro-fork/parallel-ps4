@@ -4,6 +4,8 @@ What changed in the libretro core of this fork, newest first. Changes that come 
 
 ## Unreleased
 
+- Less work per draw on the GPU thread, from a profile of Bloodborne. The texture cache remembers the image each look-up found as an exact match (256 entries, by address, size, extent, format, type and mips/layers), and answers the same look-up again without walking the page table, until an image is registered or unregistered (then the images in a region can differ, and all it remembers is dropped). The copy shader done on the host (`ExecuteCopyShaderHLE`) marks the memory it writes as the GPU's once per stretch, not once per copy: copies that touch or overlap are merged first, so the same pages, images and ranges are marked. In the profile these were about 3.5% (image look-ups) and 3% (marking and its range lists) of the core's time. Not run in a game yet.
+
 - libSceHttp2 is MSVC C89 (`network/http2.c`, `http2.h`; `http2.cpp` is gone). It goes through libSceHttp by `http_c.h`, sixteen forwarders in `http.cpp`. The connection each request made with a URL has is kept in a fixed table, claimed with a compare-and-swap and taken back with another, where a mutex guarded a std::map; its registration is in `libs.cpp`. Not run in a game yet.
 
 - libSceNetCtl's callback table is MSVC C89 (`network/net_ctl_obj.c`, `net_ctl_obj.h`; `net_ctl_obj.cpp` is gone), and lock-free: a slot is claimed with a compare-and-swap and published once filled, where a mutex guarded the table. `net_ctl_codes.h` is a C header. Not run in a game yet.

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+
 #include "common/concepts.h"
 #include "common/small_vector.h"
 #include "shader_recompiler/info.h"
@@ -110,10 +112,29 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         batch_start = batch_end;
     }
 
+    // The written ranges, marked as the GPU's: those that touch or overlap made one, so a
+    // dispatch of many copies into one stretch of memory marks it once, not once a copy.
+    // Ranges with a gap between them stay apart (the gap is the CPU's).
+    struct Range {
+        VAddr start;
+        VAddr end;
+    };
+    static Common::SmallVector<Range, 64> ranges;
+    ranges.clear();
     for (u32 i = 0; i < cs_program.dim_x; i++) {
         const VAddr dst_addr = dst_buf_sharp.base_address + (ctl_buf[i].dst_idx * buf_stride);
         const u32 size = (ctl_buf[i].end + 1) * buf_stride;
-        buffer_cache.MarkRegionAsGpuModified(dst_addr, size);
+        ranges.push_back(Range{dst_addr, dst_addr + size});
+    }
+    std::sort(ranges.begin(), ranges.end(),
+              [](const Range& a, const Range& b) { return a.start < b.start; });
+    for (size_t i = 0; i < ranges.size();) {
+        const VAddr start = ranges[i].start;
+        VAddr end = ranges[i].end;
+        for (++i; i < ranges.size() && ranges[i].start <= end; ++i) {
+            end = Common::Max(end, ranges[i].end);
+        }
+        buffer_cache.MarkRegionAsGpuModified(start, end - start);
     }
 
     return true;

@@ -426,6 +426,23 @@ private:
     Common::SlotVector<Image> slot_images;
     // The size of the game's video out buffers, which render_width scales targets of
     Extent3D frame_extent{};
+    // The images FindImage found as an exact match, by what it was asked for: valid while no
+    // image has been registered or unregistered since (the generation is the same), as the
+    // images in a region and their order change only then.
+    struct FindMemo {
+        VAddr guest_address;
+        u32 guest_size;
+        Extent3D size;
+        VkFormat pixel_format;
+        AmdGpu::ImageType type;
+        SubresourceExtent resources;
+        bool exact_fmt;
+        u64 generation;
+        ImageId image_id;
+    };
+    static constexpr size_t FIND_MEMO_SIZE = 256;
+    std::array<FindMemo, FIND_MEMO_SIZE> find_memo{};
+    u64 image_generation{1};
     Common::SlotVector<ImageView> slot_image_views;
     Common::SlotVector<Sampler> slot_samplers;
     BlitHelper blit_helper;
