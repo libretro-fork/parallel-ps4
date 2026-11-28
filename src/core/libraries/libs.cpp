@@ -4007,6 +4007,65 @@ static void RegisterNpProfileDialog(Core::Loader::SymbolsResolver* sym) {
                  sceNpProfileDialogUpdateStatus);
 }
 
+static void RegisterSsl2(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("Md+HYkCBZB4", "libSceSsl", 1, "libSceSsl", ssl2_CA_MGMT_extractKeyBlobEx);
+    LIB_FUNCTION("9bKYzKP6kYU", "libSceSsl", 1, "libSceSsl", ssl2_CA_MGMT_extractPublicKeyInfo);
+    LIB_FUNCTION("ipLIammTj2Q", "libSceSsl", 1, "libSceSsl", ssl2_CA_MGMT_freeKeyBlob);
+    LIB_FUNCTION("PRWr3-ytpdg", "libSceSsl", 1, "libSceSsl", ssl2_CRYPTO_initAsymmetricKey);
+    LIB_FUNCTION("cW7VCIMCh9A", "libSceSsl", 1, "libSceSsl", ssl2_CRYPTO_uninitAsymmetricKey);
+    LIB_FUNCTION("pBwtarKd7eg", "libSceSsl", 1, "libSceSsl", ssl2_RSA_verifySignature);
+    LIB_FUNCTION("1VM0h1JrUfA", "libSceSsl", 1, "libSceSsl", sceSsl2CheckRecvPending);
+    LIB_FUNCTION("viRXSHZYd0c", "libSceSsl", 1, "libSceSsl", sceSsl2Close);
+    LIB_FUNCTION("zXvd6iNyfgc", "libSceSsl", 1, "libSceSsl", sceSsl2Connect);
+    LIB_FUNCTION("tuscfitnhEo", "libSceSsl", 1, "libSceSsl", sceSsl2CreateConnection);
+    LIB_FUNCTION("P14ATpXc4J8", "libSceSsl", 1, "libSceSsl", sceSsl2CreateSslConnection);
+    LIB_FUNCTION("HJ1n138CQ2g", "libSceSsl", 1, "libSceSsl", sceSsl2DeleteConnection);
+    LIB_FUNCTION("hwrHV6Pprk4", "libSceSsl", 1, "libSceSsl", sceSsl2DeleteSslConnection);
+    LIB_FUNCTION("iLKz4+ukLqk", "libSceSsl", 1, "libSceSsl", sceSsl2DisableOption);
+    LIB_FUNCTION("-WqxBRAUVM4", "libSceSsl", 1, "libSceSsl", sceSsl2DisableOptionInternal);
+    LIB_FUNCTION("w1+L-27nYas", "libSceSsl", 1, "libSceSsl", sceSsl2DisableOptionInternalInsecure);
+    LIB_FUNCTION("PwsHbErG+e8", "libSceSsl", 1, "libSceSsl", sceSsl2DisableVerifyOption);
+    LIB_FUNCTION("m-zPyAsIpco", "libSceSsl", 1, "libSceSsl", sceSsl2EnableOption);
+    LIB_FUNCTION("g-zCwUKstEQ", "libSceSsl", 1, "libSceSsl", sceSsl2EnableOptionInternal);
+    LIB_FUNCTION("po1X86mgHDU", "libSceSsl", 1, "libSceSsl", sceSsl2EnableVerifyOption);
+    LIB_FUNCTION("qIvLs0gYxi0", "libSceSsl", 1, "libSceSsl", sceSsl2FreeCaCerts);
+    LIB_FUNCTION("+DzXseDVkeI", "libSceSsl", 1, "libSceSsl", sceSsl2FreeCaList);
+    LIB_FUNCTION("RwXD8grHZHM", "libSceSsl", 1, "libSceSsl", sceSsl2FreeSslCertName);
+    LIB_FUNCTION("4O7+bRkRUe8", "libSceSsl", 1, "libSceSsl", sceSsl2GetAlpnSelected);
+    LIB_FUNCTION("TDfQqO-gMbY", "libSceSsl", 1, "libSceSsl", sceSsl2GetCaCerts);
+    LIB_FUNCTION("qOn+wm28wmA", "libSceSsl", 1, "libSceSsl", sceSsl2GetCaList);
+    LIB_FUNCTION("brRtwGBu4A8", "libSceSsl", 1, "libSceSsl", sceSsl2GetFingerprint);
+    LIB_FUNCTION("7whYpYfHP74", "libSceSsl", 1, "libSceSsl", sceSsl2GetIssuerName);
+    LIB_FUNCTION("-PoIzr3PEk0", "libSceSsl", 1, "libSceSsl", sceSsl2GetMemoryPoolStats);
+    LIB_FUNCTION("R1ePzopYPYM", "libSceSsl", 1, "libSceSsl", sceSsl2GetNameEntryCount);
+    LIB_FUNCTION("7RBSTKGrmDA", "libSceSsl", 1, "libSceSsl", sceSsl2GetNameEntryInfo);
+    LIB_FUNCTION("AzUipl-DpIw", "libSceSsl", 1, "libSceSsl", sceSsl2GetNanoSSLModuleId);
+    LIB_FUNCTION("xHpt6+2pGYk", "libSceSsl", 1, "libSceSsl", sceSsl2GetNotAfter);
+    LIB_FUNCTION("Eo0S65Jy28Q", "libSceSsl", 1, "libSceSsl", sceSsl2GetNotBefore);
+    LIB_FUNCTION("-TbZc8pwPNc", "libSceSsl", 1, "libSceSsl", sceSsl2GetPeerCert);
+    LIB_FUNCTION("kLB5aGoUJXg", "libSceSsl", 1, "libSceSsl", sceSsl2GetPem);
+    LIB_FUNCTION("DOwXL+FQMEY", "libSceSsl", 1, "libSceSsl", sceSsl2GetSerialNumber);
+    LIB_FUNCTION("0XcZknp7-Wc", "libSceSsl", 1, "libSceSsl", sceSsl2GetSslError);
+    LIB_FUNCTION("dQReuBX9sD8", "libSceSsl", 1, "libSceSsl", sceSsl2GetSubjectName);
+    LIB_FUNCTION("hdpVEUDFW3s", "libSceSsl", 1, "libSceSsl", sceSsl2Init);
+    LIB_FUNCTION("Ab7+DH+gYyM", "libSceSsl", 1, "libSceSsl", sceSsl2LoadCert);
+    LIB_FUNCTION("3-643mGVFJo", "libSceSsl", 1, "libSceSsl", sceSsl2LoadRootCACert);
+    LIB_FUNCTION("jltWpVKtetg", "libSceSsl", 1, "libSceSsl", sceSsl2Read);
+    LIB_FUNCTION("hi0veU3L2pU", "libSceSsl", 1, "libSceSsl", sceSsl2Recv);
+    LIB_FUNCTION("50R2xYaYZwE", "libSceSsl", 1, "libSceSsl", sceSsl2ReuseConnection);
+    LIB_FUNCTION("p5bM5PPufFY", "libSceSsl", 1, "libSceSsl", sceSsl2Send);
+    LIB_FUNCTION("TL86glUrmUw", "libSceSsl", 1, "libSceSsl", sceSsl2SetAlpn);
+    LIB_FUNCTION("QWSxBzf6lAg", "libSceSsl", 1, "libSceSsl", sceSsl2SetMinSslVersion);
+    LIB_FUNCTION("bKaEtQnoUuQ", "libSceSsl", 1, "libSceSsl", sceSsl2SetSslVersion);
+    LIB_FUNCTION("E4a-ahM57QQ", "libSceSsl", 1, "libSceSsl", sceSsl2SetVerifyCallback);
+    LIB_FUNCTION("0K1yQ6Lv-Yc", "libSceSsl", 1, "libSceSsl", sceSsl2Term);
+    LIB_FUNCTION("UQ+3Qu7v3cA", "libSceSsl", 1, "libSceSsl", sceSsl2UnloadCert);
+    LIB_FUNCTION("iNjkt9Poblw", "libSceSsl", 1, "libSceSsl", sceSsl2Write);
+    LIB_FUNCTION("wcVuyTUr5ys", "libSceSsl", 1, "libSceSsl", ssl2_VLONG_freeVlongQueue);
+    LIB_FUNCTION("IuduYLwFh9c", "libSceSsl", 1, "libSceSsl", ssl2_Func_22E76E60BC0587D7);
+    LIB_FUNCTION("KPh5GncdOcc", "libSceSsl", 1, "libSceSsl", ssl2_Func_28F8791A771D39C7);
+}
+
 static void RegisterHttp2(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("IZ-qjhRqvjk", "libSceHttp2", 1, "libSceHttp2", sceHttp2AbortRequest);
     LIB_FUNCTION("flPxnowtvWY", "libSceHttp2", 1, "libSceHttp2", sceHttp2AddCookie);
@@ -4571,7 +4630,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
             {"libSceNetCtl.sprx", Libraries::NetCtl::RegisterLib},
             {"libSceSaveData.sprx", RegisterSaveData},
             {"libSceSaveDataDialog.sprx", RegisterSaveDataDialog},
-            {"libSceSsl2.sprx", Libraries::Ssl2::RegisterLib},
+            {"libSceSsl2.sprx", RegisterSsl2},
             {"libSceSysmodule.sprx", RegisterSysmodule},
             {"libSceNpCommerce.sprx", RegisterNpCommerce},
             {"libSceNpCommon.sprx", Libraries::Np::NpCommon::RegisterLib},

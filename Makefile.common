@@ -142,7 +142,7 @@ CORE_SOURCES_CXX += $(addprefix src/core/libraries/,libs.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/net/,net.cpp net_kernel.cpp net_log.cpp \
 	net_p2p.cpp net_p2p_ioctl.cpp net_resolver.cpp net_translate.cpp net_upnp.cpp net_util.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/network/,http.cpp \
-	netctl.cpp ssl.cpp ssl2.cpp)
+	netctl.cpp ssl.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/np_auth/,np_auth.cpp)
 CORE_SOURCES_CXX += $(addprefix src/core/libraries/np/,np_common.cpp np_manager.cpp \
 	np_trophy.cpp signaling_handler.cpp)
@@ -229,7 +229,7 @@ CORE_SOURCES_C += $(addprefix src/core/libraries/save_data/,save_backup.c save_i
 	save_memory.c savedata.c dialog/savedatadialog.c dialog/savedatadialog_ui.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audio3d/,audio3d.c audio3d_port.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/font/,font_blit.c)
-CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c http2.c net_ctl_obj.c)
+CORE_SOURCES_C += $(addprefix src/core/libraries/network/,host_override.c http2.c net_ctl_obj.c ssl2.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ngs2/,ngs2.c ngs2_core.c ngs2_util.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/audiodec/,audiodec.c)
 CORE_SOURCES_C += $(addprefix src/core/libraries/ime/,ime_support.c)

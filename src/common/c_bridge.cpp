@@ -27,6 +27,8 @@ static Common::Log::Class ToClass(c_log_class log_class) {
         return Common::Log::Class::Lib_Http;
     case C_LOG_LIB_HTTP2:
         return Common::Log::Class::Lib_Http2;
+    case C_LOG_LIB_SSL2:
+        return Common::Log::Class::Lib_Ssl2;
     case C_LOG_LIB_ULT:
         return Common::Log::Class::Lib_Ult;
     case C_LOG_LIB_ZLIB:
