@@ -29,6 +29,22 @@
         </PatchList>
     </Metadata>
     <Metadata Title="Bloodborne"
+              Name="Job Wait Pause"
+              Note="The game's job system waits for its worker threads in four loops that read a flag or a counter over and over as fast as the CPU can, with nothing in between: in a profile, the main thread spent much of its time in one of them. This puts a PAUSE instruction (the CPU's own hint that a loop is waiting on another thread) in each, where the loop starts again: the loop waits as long as it did, but leaves more of the core to the other thread on it (with Hyper-Threading or SMT) and draws less power, and the CPU does not have to undo what it guessed ahead when the wait ends. Nothing else is changed: each PAUSE takes the place of padding the compiler left there, and each loop's jump back goes to it. Found by the game's own code, so every version of the game that has these loops gets it."
+              PatchVer="1.0"
+              AppElf="eboot.bin">
+        <PatchList>
+            <Line Type="mask" Address="66 0F 1F 44 00 00 45 3B 27 0F 8E ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 74 EE" Value="0F1F4000F390" Offset="0"/>
+            <Line Type="mask" Address="45 3B 27 0F 8E ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 74 EE" Value="EC" Offset="17"/>
+            <Line Type="mask" Address="66 66 66 66 66 66 2E 0F 1F 84 00 00 00 00 00 8B 3E 83 FF 02 75 F9 FF C2 39 C2 72 ?? 8B 43 18" Value="666666662E0F1F840000000000F390" Offset="0"/>
+            <Line Type="mask" Address="8B 3E 83 FF 02 75 F9 FF C2 39 C2 72 ?? 8B 43 18" Value="F7" Offset="6"/>
+            <Line Type="mask" Address="66 66 66 66 66 66 2E 0F 1F 84 00 00 00 00 00 8B 3E 83 FF 02 75 F9 FF C2 39 C2 72 ?? EB 04" Value="666666662E0F1F840000000000F390" Offset="0"/>
+            <Line Type="mask" Address="8B 3E 83 FF 02 75 F9 FF C2 39 C2 72 ?? EB 04" Value="F7" Offset="6"/>
+            <Line Type="mask" Address="66 0F 1F 44 00 00 80 3D ?? ?? ?? ?? 00 74 7C" Value="0F1F4000F390" Offset="0"/>
+            <Line Type="mask" Address="45 3B 27 0F 8F 72 FF FF FF 8B 43 08 83 F8 02" Value="70" Offset="5"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne"
               Name="Highest Model Detail Everywhere"
               Group="Model Detail"
               Choice="Highest everywhere"

@@ -217,10 +217,13 @@ static void parallel_patches(int argc, char** argv) {
          * finds where FMOD's own code sets the two (the block's length, then all the blocks'
          * together) and writes 512 over the 1024: the bytes are each game's own. */
         entry = find(&cat, "Lower Audio Latency");
-        /* Bloodborne has seventeen more: the Model Detail group's, the Frame Rate
-         * group's and the graphics settings' (gparam lines) */
-        CHECK(entry >= 0 && cat.count == (f == 0 ? 19u : 2u), "its patches");
+        /* Bloodborne has eighteen more: the Model Detail group's, the Frame Rate
+         * group's, the graphics settings' (gparam lines) and Job Wait Pause */
+        CHECK(entry >= 0 && cat.count == (f == 0 ? 20u : 2u), "its patches");
         if (f == 0) {
+            const int pause = find(&cat, "Job Wait Pause");
+            CHECK(pause >= 0 && cat.entries[pause].versions[0] == '\0',
+                  "Job Wait Pause, for every version");
             static const char* const detail[] = {"Highest Model Detail Everywhere",
                                                  "Lower Model Detail Everywhere",
                                                  "Lowest Model Detail Everywhere"};
@@ -282,7 +285,7 @@ static void parallel_patches(int argc, char** argv) {
             size_t n, first = 0;
             unsigned m;
             CHECK(cat.entries[entry].versions[0] == '\0', "for every version");
-            CHECK(cat.metadata_count == (f == 0 ? 19u : 2u),
+            CHECK(cat.metadata_count == (f == 0 ? 20u : 2u),
                   "a metadata for each patch");
             for (m = 0; m < cat.metadata_count; m++) {
                 const char* name = rxml_node_attrib(cat.metadata[m].node, "Name");
